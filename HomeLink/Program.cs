@@ -17,7 +17,7 @@ public static class Program
 
         DateTime? spotifyTokenExpiry = null;
         var expiryEnv = Environment.GetEnvironmentVariable("SPOTIFY_TOKEN_EXPIRY");
-        if (!string.IsNullOrEmpty(expiryEnv))
+        if (expiryEnv != null)
         {
             if (DateTime.TryParse(expiryEnv, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var parsed))
             {
@@ -36,15 +36,12 @@ public static class Program
                 spotifyRefreshToken,
                 spotifyTokenExpiry));
         
-        // Register LocationService as singleton to maintain cached location state
         builder.Services.AddHttpClient<Services.LocationService>();
-        builder.Services.AddSingleton<Services.LocationService>(sp =>
-        {
-            var httpClientFactory = sp.GetRequiredService<IHttpClientFactory>();
-            var httpClient = httpClientFactory.CreateClient(nameof(Services.LocationService));
-            return new Services.LocationService(httpClient);
-        });
+        builder.Services.AddSingleton<Services.LocationService>();
+
+        builder.Services.AddHttpClient<Services.DrawingService>();
         builder.Services.AddScoped<Services.DrawingService>();
+        
         builder.Services.AddControllers();
         // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
         builder.Services.AddOpenApi();

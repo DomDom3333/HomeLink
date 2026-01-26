@@ -27,7 +27,7 @@ public class SpotifyService
     private DateTime _tokenExpiry = DateTime.MinValue;
     private SpotifyTrackInfo? _lastTrackInfo;
 
-    public SpotifyService(string clientId, string clientSecret, string? refreshToken = null, DateTime? expiry = null)
+    public SpotifyService(string? clientId, string? clientSecret, string? refreshToken = null, DateTime? expiry = null)
     {
         _clientId = string.IsNullOrWhiteSpace(clientId) ? null : clientId;
         _clientSecret = string.IsNullOrWhiteSpace(clientSecret) ? null : clientSecret;

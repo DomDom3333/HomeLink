@@ -4,6 +4,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using SixLabors.Fonts;
 using QRCoder;
+using Microsoft.Extensions.Logging;
 
 namespace HomeLink.Services;
 
@@ -46,13 +47,15 @@ public class DrawingService
     private const int SmallQrCodeSize = 100;
 
     private readonly HttpClient _httpClient;
+    private readonly ILogger<DrawingService> _logger;
     private readonly FontCollection _fontCollection;
     private readonly FontFamily _fontFamily;
     private readonly DrawingOptions _noAaOptions;
 
-    public DrawingService()
+    public DrawingService(HttpClient httpClient, ILogger<DrawingService> logger)
     {
-        _httpClient = new HttpClient();
+        _httpClient = httpClient;
+        _logger = logger;
         _fontCollection = new FontCollection();
         _noAaOptions = new DrawingOptions
         {
@@ -77,7 +80,7 @@ public class DrawingService
         else
         {
             // Fallback to system fonts if bundled font not found
-            Console.WriteLine($"Warning: Bundled font not found at {fontPath}. Falling back to system fonts.");
+            _logger.LogWarning("Bundled font not found at {FontPath}. Falling back to system fonts.", fontPath);
             _fontFamily = SystemFonts.Get("DejaVu Sans");
         }
     }
@@ -97,7 +100,6 @@ public class DrawingService
         var smallFont = _fontFamily.CreateFont(16);
         var smallBoldFont = _fontFamily.CreateFont(16, FontStyle.Bold);
         var tinyFont = _fontFamily.CreateFont(13);
-        var tinyBoldFont = _fontFamily.CreateFont(13, FontStyle.Bold);
 
         var black = Color.Black;
         var darkGray = new Color(new Rgba32(64, 64, 64));
@@ -369,16 +371,16 @@ public class DrawingService
 
         // Save debug image (grayscale before dithering)
         var debugPath = Path.Combine(Path.GetTempPath(), "homelink_debug_grayscale.png");
-        image.SaveAsPng(debugPath);
-        Console.WriteLine($"Debug grayscale image saved to: {debugPath}");
+        await image.SaveAsPngAsync(debugPath);
+        _logger.LogInformation("Debug grayscale image saved to: {DebugPath}", debugPath);
 
         // Apply Floyd-Steinberg dithering for 1-bit conversion
         var ditheredBitmap = DitherImage(image);
 
         // Save debug image (after dithering)
         var debugDitheredPath = Path.Combine(Path.GetTempPath(), "homelink_debug_dithered.png");
-        ditheredBitmap.SaveAsPng(debugDitheredPath);
-        Console.WriteLine($"Debug dithered image saved to: {debugDitheredPath}");
+        await ditheredBitmap.SaveAsPngAsync(debugDitheredPath);
+        _logger.LogInformation("Debug dithered image saved to: {DebugDitheredPath}", debugDitheredPath);
 
         // Convert to packed 1-bit format
         var einkBitmap = ConvertToPacked1Bit(ditheredBitmap);
@@ -414,7 +416,7 @@ public class DrawingService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to load album art: {ex.Message}");
+            _logger.LogError(ex, "Failed to load album art from {Url}", url);
             // Draw placeholder on error
             var font = _fontFamily.CreateFont(16);
             DrawPlaceholder(image, x, y, size, "Art unavailable", font, new Color(new Rgba32(180, 180, 180)));
@@ -459,7 +461,7 @@ public class DrawingService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to generate QR code: {ex.Message}");
+            _logger.LogError(ex, "Failed to generate QR code");
             // Draw placeholder on error
             var font = _fontFamily.CreateFont(12);
             DrawPlaceholder(image, x, y, size, "QR Error", font, new Color(new Rgba32(180, 180, 180)));
