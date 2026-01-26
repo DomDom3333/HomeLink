@@ -94,13 +94,15 @@ public class DrawingService
         var font = _fontFamily.CreateFont(20);
         var titleFont = _fontFamily.CreateFont(32, FontStyle.Bold);
         var largeFont = _fontFamily.CreateFont(26);
-        var smallFont = _fontFamily.CreateFont(14);
-        var tinyFont = _fontFamily.CreateFont(11);
+        var smallFont = _fontFamily.CreateFont(16);
+        var smallBoldFont = _fontFamily.CreateFont(16, FontStyle.Bold);
+        var tinyFont = _fontFamily.CreateFont(13);
+        var tinyBoldFont = _fontFamily.CreateFont(13, FontStyle.Bold);
 
         var black = Color.Black;
         var darkGray = new Color(new Rgba32(64, 64, 64));
-        var mediumGray = new Color(new Rgba32(128, 128, 128));
-        var lightGray = new Color(new Rgba32(192, 192, 192));
+        var mediumGray = new Color(new Rgba32(100, 100, 100));
+        var lightGray = new Color(new Rgba32(160, 160, 160));
 
         // Calculate layout zones
         var leftColumnWidth = AlbumArtSize + Margin * 2;
@@ -130,7 +132,7 @@ public class DrawingService
         {
             // "NOW PLAYING" header
             var nowPlayingY = yPos;
-            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "NOW PLAYING", smallFont, mediumGray, new PointF(centerX, nowPlayingY)));
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "NOW PLAYING", smallBoldFont, darkGray, new PointF(centerX, nowPlayingY)));
             yPos += 25;
 
             // Track Title
@@ -178,7 +180,7 @@ public class DrawingService
             
             // Label under QR code
             var spotifyLabelY = spotifyQrY + QrCodeSize + 5;
-            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Scan to Play", tinyFont, mediumGray, new PointF(spotifyQrX + 15, spotifyLabelY)));
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Scan to Play", tinyFont, darkGray, new PointF(spotifyQrX + 15, spotifyLabelY)));
         }
 
         // ============================================================
@@ -206,7 +208,7 @@ public class DrawingService
             
             // Location header
             var locHeaderY = bottomY;
-            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "CURRENT LOCATION", smallFont, mediumGray, new PointF(infoX, locHeaderY)));
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "CURRENT LOCATION", smallBoldFont, darkGray, new PointF(infoX, locHeaderY)));
 
             // Primary location name (human readable or display name)
             var locationText = !string.IsNullOrEmpty(locationData.HumanReadable)
@@ -228,7 +230,7 @@ public class DrawingService
             // Coordinates with icon-style prefix
             var coordsText = $"GPS: {locationData.Latitude:F5}, {locationData.Longitude:F5}";
             var coordsY = bottomY + 85;
-            image.Mutate(ctx => ctx.DrawText(_noAaOptions, coordsText, smallFont, mediumGray, new PointF(infoX, coordsY)));
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, coordsText, smallFont, darkGray, new PointF(infoX, coordsY)));
 
             // Device status line (battery, accuracy, speed, connection)
             var deviceStatusParts = new List<string>();
@@ -278,7 +280,7 @@ public class DrawingService
             {
                 var deviceStatusText = string.Join("  •  ", deviceStatusParts);
                 var deviceStatusY = bottomY + 105;
-                image.Mutate(ctx => ctx.DrawText(_noAaOptions, deviceStatusText, smallFont, mediumGray, new PointF(infoX, deviceStatusY)));
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, deviceStatusText, smallFont, darkGray, new PointF(infoX, deviceStatusY)));
             }
 
             // Known location indicator (if matched)
@@ -311,7 +313,7 @@ public class DrawingService
                     ? $"~{distance:F0}m from center" 
                     : $"~{distance/1000:F1}km from center";
                 var distY = bottomY + 160;  // Moved down to accommodate device status
-                image.Mutate(ctx => ctx.DrawText(_noAaOptions, distanceText, tinyFont, mediumGray, new PointF(infoX, distY)));
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, distanceText, tinyFont, darkGray, new PointF(infoX, distY)));
             }
 
             // === RIGHT: Maps QR Code ===
@@ -325,7 +327,7 @@ public class DrawingService
 
             // Label under Maps QR code
             var mapsLabelY = mapsQrY + SmallQrCodeSize + 5;
-            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Open in Maps", tinyFont, mediumGray, new PointF(mapsQrX + 5, mapsLabelY)));
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Open in Maps", tinyFont, darkGray, new PointF(mapsQrX + 5, mapsLabelY)));
         }
         else
         {
@@ -353,10 +355,10 @@ public class DrawingService
         // ============================================================
         var footerY = DisplayHeight - Margin - 12;
         var timestamp = DateTime.Now.ToString("MMM dd, yyyy  HH:mm");
-        image.Mutate(ctx => ctx.DrawText(_noAaOptions, $"Updated: {timestamp}", tinyFont, lightGray, new PointF(Margin, footerY)));
+        image.Mutate(ctx => ctx.DrawText(_noAaOptions, $"Updated: {timestamp}", tinyFont, mediumGray, new PointF(Margin, footerY)));
 
         // HomeLink branding
-        image.Mutate(ctx => ctx.DrawText(_noAaOptions, "HomeLink", tinyFont, lightGray, new PointF(DisplayWidth - 100, footerY)));
+        image.Mutate(ctx => ctx.DrawText(_noAaOptions, "HomeLink", tinyFont, mediumGray, new PointF(DisplayWidth - 100, footerY)));
 
         // Save debug image (grayscale before dithering)
         var debugPath = Path.Combine(Path.GetTempPath(), "homelink_debug_grayscale.png");
