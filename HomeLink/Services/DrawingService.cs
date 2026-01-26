@@ -46,10 +46,32 @@ public class DrawingService
     private const int SmallQrCodeSize = 100;
 
     private readonly HttpClient _httpClient;
+    private readonly FontCollection _fontCollection;
+    private readonly FontFamily _fontFamily;
 
     public DrawingService()
     {
         _httpClient = new HttpClient();
+        _fontCollection = new FontCollection();
+        
+        // Load bundled font from Fonts folder
+        var fontPath = Path.Combine(AppContext.BaseDirectory, "Fonts", "DejaVuSans.ttf");
+        var boldFontPath = Path.Combine(AppContext.BaseDirectory, "Fonts", "DejaVuSans-Bold.ttf");
+        
+        if (File.Exists(fontPath))
+        {
+            _fontFamily = _fontCollection.Add(fontPath);
+            if (File.Exists(boldFontPath))
+            {
+                _fontCollection.Add(boldFontPath);
+            }
+        }
+        else
+        {
+            // Fallback to system fonts if bundled font not found
+            Console.WriteLine($"Warning: Bundled font not found at {fontPath}. Falling back to system fonts.");
+            _fontFamily = SystemFonts.Get("DejaVu Sans");
+        }
     }
 
     /// <summary>
@@ -61,11 +83,11 @@ public class DrawingService
         // Create a grayscale image at display resolution (horizontal)
         using var image = new Image<L8>(DisplayWidth, DisplayHeight, new L8(255)); // White background
 
-        var font = SystemFonts.CreateFont("Arial", 20);
-        var titleFont = SystemFonts.CreateFont("Arial", 32, FontStyle.Bold);
-        var largeFont = SystemFonts.CreateFont("Arial", 26);
-        var smallFont = SystemFonts.CreateFont("Arial", 14);
-        var tinyFont = SystemFonts.CreateFont("Arial", 11);
+        var font = _fontFamily.CreateFont(20);
+        var titleFont = _fontFamily.CreateFont(32, FontStyle.Bold);
+        var largeFont = _fontFamily.CreateFont(26);
+        var smallFont = _fontFamily.CreateFont(14);
+        var tinyFont = _fontFamily.CreateFont(11);
 
         var black = Color.Black;
         var darkGray = new Color(new Rgba32(64, 64, 64));
@@ -503,7 +525,7 @@ public class DrawingService
         {
             Console.WriteLine($"Failed to load album art: {ex.Message}");
             // Draw placeholder on error
-            var font = SystemFonts.CreateFont("Arial", 16);
+            var font = _fontFamily.CreateFont(16);
             DrawPlaceholder(image, x, y, size, "Art unavailable", font, new Color(new Rgba32(180, 180, 180)));
         }
     }
@@ -553,7 +575,7 @@ public class DrawingService
         {
             Console.WriteLine($"Failed to generate QR code: {ex.Message}");
             // Draw placeholder on error
-            var font = SystemFonts.CreateFont("Arial", 12);
+            var font = _fontFamily.CreateFont(12);
             DrawPlaceholder(image, x, y, size, "QR Error", font, new Color(new Rgba32(180, 180, 180)));
         }
     }
@@ -856,7 +878,7 @@ public class DrawingService
     {
         var lightGray = new Color(new Rgba32(200, 200, 200));
         var mediumGray = new Color(new Rgba32(150, 150, 150));
-        var font = SystemFonts.CreateFont("Arial", 10);
+        var font = _fontFamily.CreateFont(10);
 
         image.Mutate(ctx =>
         {

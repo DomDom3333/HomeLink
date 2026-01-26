@@ -21,4 +21,10 @@
       </Content>
     </ItemGroup>
 
+    <ItemGroup>
+      <Content Include="Fonts\*.ttf">
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      </Content>
+    </ItemGroup>
+
 </Project>
