@@ -130,9 +130,15 @@ public class DrawingService
 
         if (spotifyData != null)
         {
-            // "NOW PLAYING" header
-            var nowPlayingY = yPos;
-            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "NOW PLAYING", smallBoldFont, darkGray, new PointF(centerX, nowPlayingY)));
+            // Playback status header
+            var statusY = yPos;
+            var statusText = spotifyData.IsPlaying ? "PLAYING" : "PAUSED";
+            
+            // Draw icon (play triangle or pause bars)
+            DrawPlaybackIcon(image, spotifyData.IsPlaying, centerX, statusY + 4, 12, darkGray);
+            
+            // Draw text next to icon
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, statusText, smallBoldFont, darkGray, new PointF(centerX + 20, statusY)));
             yPos += 25;
 
             // Track Title
@@ -333,7 +339,8 @@ public class DrawingService
         {
             // No location data - draw placeholder
             var noLocY = bottomY + 50;
-            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Location not available", largeFont, mediumGray, new PointF(Margin + 50, noLocY)));
+            var noLocX = Margin + mapSize + Margin;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Location not available", largeFont, mediumGray, new PointF(noLocX, noLocY)));
 
             // Draw a placeholder map outline
             image.Mutate(ctx =>
@@ -501,6 +508,46 @@ public class DrawingService
                 new PointF(x + width, y),
                 new PointF(x + width, y + barHeight),
                 new PointF(x, y + barHeight));
+        });
+    }
+
+    /// <summary>
+    /// Draws a play or pause icon
+    /// </summary>
+    private void DrawPlaybackIcon(Image<L8> image, bool isPlaying, int x, int y, int size, Color color)
+    {
+        image.Mutate(ctx =>
+        {
+            if (isPlaying)
+            {
+                // Draw Play Triangle
+                var points = new PointF[]
+                {
+                    new PointF(x, y),
+                    new PointF(x + size, y + size / 2f),
+                    new PointF(x, y + size)
+                };
+                ctx.FillPolygon(_noAaOptions, color, points);
+            }
+            else
+            {
+                // Draw Pause Bars
+                var barWidth = size / 3f;
+                
+                // Left bar
+                ctx.FillPolygon(_noAaOptions, color,
+                    new PointF(x, y),
+                    new PointF(x + barWidth, y),
+                    new PointF(x + barWidth, y + size),
+                    new PointF(x, y + size));
+                
+                // Right bar
+                ctx.FillPolygon(_noAaOptions, color,
+                    new PointF(x + size - barWidth, y),
+                    new PointF(x + size, y),
+                    new PointF(x + size, y + size),
+                    new PointF(x + size - barWidth, y + size));
+            }
         });
     }
 

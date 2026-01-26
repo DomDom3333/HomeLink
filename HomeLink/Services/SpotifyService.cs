@@ -12,6 +12,7 @@ public class SpotifyTrackInfo
     public long DurationMs { get; set; }
     public string SpotifyUri { get; set; } = string.Empty;
     public string ScannableCodeUrl { get; set; } = string.Empty;
+    public bool IsPlaying { get; set; }
 }
 
 public class SpotifyService
@@ -19,10 +20,12 @@ public class SpotifyService
     private readonly string? _clientId;
     private readonly string? _clientSecret;
     private readonly object _tokenLock = new();
+    private readonly object _cacheLock = new();
     
     private string? _accessToken;
     private string? _refreshToken;
     private DateTime _tokenExpiry = DateTime.MinValue;
+    private SpotifyTrackInfo? _lastTrackInfo;
 
     public SpotifyService(string clientId, string clientSecret, string? refreshToken = null, DateTime? expiry = null)
     {
@@ -103,19 +106,31 @@ public class SpotifyService
         var client = await GetClientAsync();
         var currentlyPlaying = await client.Player.GetCurrentlyPlaying(new PlayerCurrentlyPlayingRequest());
         
-        if (currentlyPlaying?.Item is FullTrack track)
+        lock (_cacheLock)
         {
-            return new SpotifyTrackInfo
+            if (currentlyPlaying?.Item is FullTrack track)
             {
-                Title = track.Name,
-                Artist = string.Join(", ", track.Artists.Select(a => a.Name)),
-                Album = track.Album.Name,
-                AlbumCoverUrl = track.Album.Images.FirstOrDefault()?.Url ?? string.Empty,
-                ProgressMs = currentlyPlaying.ProgressMs ?? 0,
-                DurationMs = track.DurationMs,
-                SpotifyUri = track.Uri,
-                ScannableCodeUrl = $"https://scannables.scdn.co/uri/plain/jpeg/000000/white/640/spotify:track:{track.Id}"
-            };
+                _lastTrackInfo = new SpotifyTrackInfo
+                {
+                    Title = track.Name,
+                    Artist = string.Join(", ", track.Artists.Select(a => a.Name)),
+                    Album = track.Album.Name,
+                    AlbumCoverUrl = track.Album.Images.FirstOrDefault()?.Url ?? string.Empty,
+                    ProgressMs = currentlyPlaying.ProgressMs ?? 0,
+                    DurationMs = track.DurationMs,
+                    SpotifyUri = track.Uri,
+                    ScannableCodeUrl = $"https://scannables.scdn.co/uri/plain/jpeg/000000/white/640/spotify:track:{track.Id}",
+                    IsPlaying = currentlyPlaying.IsPlaying
+                };
+                return _lastTrackInfo;
+            }
+
+            if (_lastTrackInfo != null)
+            {
+                // If nothing is playing, return the last known track but marked as paused
+                _lastTrackInfo.IsPlaying = false;
+                return _lastTrackInfo;
+            }
         }
 
         return null;
