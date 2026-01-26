@@ -48,11 +48,19 @@ public class DrawingService
     private readonly HttpClient _httpClient;
     private readonly FontCollection _fontCollection;
     private readonly FontFamily _fontFamily;
+    private readonly DrawingOptions _noAaOptions;
 
     public DrawingService()
     {
         _httpClient = new HttpClient();
         _fontCollection = new FontCollection();
+        _noAaOptions = new DrawingOptions
+        {
+            GraphicsOptions = new GraphicsOptions
+            {
+                Antialias = false
+            }
+        };
         
         // Load bundled font from Fonts folder
         var fontPath = Path.Combine(AppContext.BaseDirectory, "Fonts", "DejaVuSans.ttf");
@@ -122,53 +130,25 @@ public class DrawingService
         {
             // "NOW PLAYING" header
             var nowPlayingY = yPos;
-            image.Mutate(ctx =>
-            {
-                var options = new RichTextOptions(smallFont)
-                {
-                    Origin = new PointF(centerX, nowPlayingY)
-                };
-                ctx.DrawText(options, "NOW PLAYING", mediumGray);
-            });
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "NOW PLAYING", smallFont, mediumGray, new PointF(centerX, nowPlayingY)));
             yPos += 25;
 
             // Track Title
             var trackText = TruncateText(spotifyData.Title, 30);
             var titleY = yPos;
-            image.Mutate(ctx =>
-            {
-                var options = new RichTextOptions(titleFont)
-                {
-                    Origin = new PointF(centerX, titleY)
-                };
-                ctx.DrawText(options, trackText, black);
-            });
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, trackText, titleFont, black, new PointF(centerX, titleY)));
             yPos += 45;
 
             // Artist
             var artistText = TruncateText(spotifyData.Artist, 35);
             var artistY = yPos;
-            image.Mutate(ctx =>
-            {
-                var options = new RichTextOptions(largeFont)
-                {
-                    Origin = new PointF(centerX, artistY)
-                };
-                ctx.DrawText(options, artistText, darkGray);
-            });
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, artistText, largeFont, darkGray, new PointF(centerX, artistY)));
             yPos += 35;
 
             // Album
             var albumText = TruncateText(spotifyData.Album, 40);
             var albumY = yPos;
-            image.Mutate(ctx =>
-            {
-                var options = new RichTextOptions(font)
-                {
-                    Origin = new PointF(centerX, albumY)
-                };
-                ctx.DrawText(options, albumText, mediumGray);
-            });
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, albumText, font, mediumGray, new PointF(centerX, albumY)));
             yPos += 35;
 
             // Progress bar
@@ -179,27 +159,13 @@ public class DrawingService
             // Time display
             var progressText = $"{FormatTime(spotifyData.ProgressMs)} / {FormatTime(spotifyData.DurationMs)}";
             var timeY = yPos;
-            image.Mutate(ctx =>
-            {
-                var options = new RichTextOptions(smallFont)
-                {
-                    Origin = new PointF(centerX, timeY)
-                };
-                ctx.DrawText(options, progressText, darkGray);
-            });
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, progressText, smallFont, darkGray, new PointF(centerX, timeY)));
         }
         else
         {
             // No track playing message
             var noTrackY = yPos + 50;
-            image.Mutate(ctx =>
-            {
-                var options = new RichTextOptions(titleFont)
-                {
-                    Origin = new PointF(centerX, noTrackY)
-                };
-                ctx.DrawText(options, "Nothing Playing", mediumGray);
-            });
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Nothing Playing", titleFont, mediumGray, new PointF(centerX, noTrackY)));
         }
 
         // === RIGHT: Spotify QR Code ===
@@ -212,14 +178,7 @@ public class DrawingService
             
             // Label under QR code
             var spotifyLabelY = spotifyQrY + QrCodeSize + 5;
-            image.Mutate(ctx =>
-            {
-                var options = new RichTextOptions(tinyFont)
-                {
-                    Origin = new PointF(spotifyQrX + 15, spotifyLabelY)
-                };
-                ctx.DrawText(options, "Scan to Play", mediumGray);
-            });
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Scan to Play", tinyFont, mediumGray, new PointF(spotifyQrX + 15, spotifyLabelY)));
         }
 
         // ============================================================
@@ -228,7 +187,7 @@ public class DrawingService
         var separatorY = topSectionHeight;
         image.Mutate(ctx =>
         {
-            ctx.DrawLine(lightGray, 2, new PointF(Margin, separatorY), new PointF(DisplayWidth - Margin, separatorY));
+            ctx.DrawLine(_noAaOptions, lightGray, 2, new PointF(Margin, separatorY), new PointF(DisplayWidth - Margin, separatorY));
         });
 
         // ============================================================
@@ -247,14 +206,7 @@ public class DrawingService
             
             // Location header
             var locHeaderY = bottomY;
-            image.Mutate(ctx =>
-            {
-                var options = new RichTextOptions(smallFont)
-                {
-                    Origin = new PointF(infoX, locHeaderY)
-                };
-                ctx.DrawText(options, "CURRENT LOCATION", mediumGray);
-            });
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "CURRENT LOCATION", smallFont, mediumGray, new PointF(infoX, locHeaderY)));
 
             // Primary location name (human readable or display name)
             var locationText = !string.IsNullOrEmpty(locationData.HumanReadable)
@@ -263,41 +215,20 @@ public class DrawingService
             locationText = TruncateText(locationText, 35);
 
             var locTextY = bottomY + 22;
-            image.Mutate(ctx =>
-            {
-                var options = new RichTextOptions(largeFont)
-                {
-                    Origin = new PointF(infoX, locTextY)
-                };
-                ctx.DrawText(options, locationText, black);
-            });
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, locationText, largeFont, black, new PointF(infoX, locTextY)));
 
             // City/District & Country
             var cityCountry = BuildCityCountryString(locationData);
             if (!string.IsNullOrEmpty(cityCountry))
             {
                 var cityY = bottomY + 55;
-                image.Mutate(ctx =>
-                {
-                    var options = new RichTextOptions(font)
-                    {
-                        Origin = new PointF(infoX, cityY)
-                    };
-                    ctx.DrawText(options, cityCountry, darkGray);
-                });
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, cityCountry, font, darkGray, new PointF(infoX, cityY)));
             }
 
             // Coordinates with icon-style prefix
             var coordsText = $"GPS: {locationData.Latitude:F5}, {locationData.Longitude:F5}";
             var coordsY = bottomY + 85;
-            image.Mutate(ctx =>
-            {
-                var options = new RichTextOptions(smallFont)
-                {
-                    Origin = new PointF(infoX, coordsY)
-                };
-                ctx.DrawText(options, coordsText, mediumGray);
-            });
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, coordsText, smallFont, mediumGray, new PointF(infoX, coordsY)));
 
             // Device status line (battery, accuracy, speed, connection)
             var deviceStatusParts = new List<string>();
@@ -347,14 +278,7 @@ public class DrawingService
             {
                 var deviceStatusText = string.Join("  •  ", deviceStatusParts);
                 var deviceStatusY = bottomY + 105;
-                image.Mutate(ctx =>
-                {
-                    var options = new RichTextOptions(smallFont)
-                    {
-                        Origin = new PointF(infoX, deviceStatusY)
-                    };
-                    ctx.DrawText(options, deviceStatusText, mediumGray);
-                });
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, deviceStatusText, smallFont, mediumGray, new PointF(infoX, deviceStatusY)));
             }
 
             // Known location indicator (if matched)
@@ -363,20 +287,13 @@ public class DrawingService
                 var knownY = bottomY + 130;  // Moved down to accommodate device status
                 var iconPrefix = GetLocationIcon(locationData.MatchedKnownLocation.Icon);
                 var knownText = $"{iconPrefix} {locationData.MatchedKnownLocation.DisplayText}";
-                image.Mutate(ctx =>
-                {
-                    var options = new RichTextOptions(font)
-                    {
-                        Origin = new PointF(infoX, knownY)
-                    };
-                    ctx.DrawText(options, knownText, black);
-                });
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, knownText, font, black, new PointF(infoX, knownY)));
 
                 // Draw a small box/badge around known location
                 var badgeWidth = knownText.Length * 10 + 20;
                 image.Mutate(ctx =>
                 {
-                    ctx.DrawPolygon(darkGray, 1,
+                    ctx.DrawPolygon(_noAaOptions, darkGray, 1,
                         new PointF(infoX - 5, knownY - 3),
                         new PointF(infoX + badgeWidth, knownY - 3),
                         new PointF(infoX + badgeWidth, knownY + 22),
@@ -394,14 +311,7 @@ public class DrawingService
                     ? $"~{distance:F0}m from center" 
                     : $"~{distance/1000:F1}km from center";
                 var distY = bottomY + 160;  // Moved down to accommodate device status
-                image.Mutate(ctx =>
-                {
-                    var options = new RichTextOptions(tinyFont)
-                    {
-                        Origin = new PointF(infoX, distY)
-                    };
-                    ctx.DrawText(options, distanceText, mediumGray);
-                });
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, distanceText, tinyFont, mediumGray, new PointF(infoX, distY)));
             }
 
             // === RIGHT: Maps QR Code ===
@@ -415,40 +325,26 @@ public class DrawingService
 
             // Label under Maps QR code
             var mapsLabelY = mapsQrY + SmallQrCodeSize + 5;
-            image.Mutate(ctx =>
-            {
-                var options = new RichTextOptions(tinyFont)
-                {
-                    Origin = new PointF(mapsQrX + 5, mapsLabelY)
-                };
-                ctx.DrawText(options, "Open in Maps", mediumGray);
-            });
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Open in Maps", tinyFont, mediumGray, new PointF(mapsQrX + 5, mapsLabelY)));
         }
         else
         {
             // No location data - draw placeholder
             var noLocY = bottomY + 50;
-            image.Mutate(ctx =>
-            {
-                var options = new RichTextOptions(largeFont)
-                {
-                    Origin = new PointF(Margin + 50, noLocY)
-                };
-                ctx.DrawText(options, "Location not available", mediumGray);
-            });
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Location not available", largeFont, mediumGray, new PointF(Margin + 50, noLocY)));
 
             // Draw a placeholder map outline
             image.Mutate(ctx =>
             {
-                ctx.DrawPolygon(lightGray, 2,
+                ctx.DrawPolygon(_noAaOptions, lightGray, 2,
                     new PointF(Margin, bottomY),
                     new PointF(Margin + mapSize, bottomY),
                     new PointF(Margin + mapSize, bottomY + mapSize),
                     new PointF(Margin, bottomY + mapSize));
                 
                 // Draw X through it
-                ctx.DrawLine(lightGray, 1, new PointF(Margin, bottomY), new PointF(Margin + mapSize, bottomY + mapSize));
-                ctx.DrawLine(lightGray, 1, new PointF(Margin + mapSize, bottomY), new PointF(Margin, bottomY + mapSize));
+                ctx.DrawLine(_noAaOptions, lightGray, 1, new PointF(Margin, bottomY), new PointF(Margin + mapSize, bottomY + mapSize));
+                ctx.DrawLine(_noAaOptions, lightGray, 1, new PointF(Margin + mapSize, bottomY), new PointF(Margin, bottomY + mapSize));
             });
         }
 
@@ -457,24 +353,10 @@ public class DrawingService
         // ============================================================
         var footerY = DisplayHeight - Margin - 12;
         var timestamp = DateTime.Now.ToString("MMM dd, yyyy  HH:mm");
-        image.Mutate(ctx =>
-        {
-            var options = new RichTextOptions(tinyFont)
-            {
-                Origin = new PointF(Margin, footerY)
-            };
-            ctx.DrawText(options, $"Updated: {timestamp}", lightGray);
-        });
+        image.Mutate(ctx => ctx.DrawText(_noAaOptions, $"Updated: {timestamp}", tinyFont, lightGray, new PointF(Margin, footerY)));
 
         // HomeLink branding
-        image.Mutate(ctx =>
-        {
-            var options = new RichTextOptions(tinyFont)
-            {
-                Origin = new PointF(DisplayWidth - 100, footerY)
-            };
-            ctx.DrawText(options, "HomeLink", lightGray);
-        });
+        image.Mutate(ctx => ctx.DrawText(_noAaOptions, "HomeLink", tinyFont, lightGray, new PointF(DisplayWidth - 100, footerY)));
 
         // Save debug image (grayscale before dithering)
         var debugPath = Path.Combine(Path.GetTempPath(), "homelink_debug_grayscale.png");
@@ -538,19 +420,14 @@ public class DrawingService
         image.Mutate(ctx =>
         {
             // Draw border
-            ctx.DrawPolygon(color, 2,
+            ctx.DrawPolygon(_noAaOptions, color, 2,
                 new PointF(x, y),
                 new PointF(x + size, y),
                 new PointF(x + size, y + size),
                 new PointF(x, y + size));
 
             // Draw text centered
-            var options = new RichTextOptions(font)
-            {
-                Origin = new PointF(x + size / 4, y + size / 2),
-                WrappingLength = size - 20
-            };
-            ctx.DrawText(options, text, color);
+            ctx.DrawText(_noAaOptions, text, font, color, new PointF(x + size / 4, y + size / 2));
         });
     }
 
@@ -567,7 +444,7 @@ public class DrawingService
             var qrBytes = qrCode.GetGraphic(20);
 
             using var qrImage = Image.Load<L8>(qrBytes);
-            qrImage.Mutate(ctx => ctx.Resize(size, size));
+            qrImage.Mutate(ctx => ctx.Resize(size, size, KnownResamplers.NearestNeighbor));
 
             image.Mutate(ctx => ctx.DrawImage(qrImage, new Point(x, y), 1f));
         }
@@ -590,7 +467,7 @@ public class DrawingService
         // Background
         image.Mutate(ctx =>
         {
-            ctx.FillPolygon(bgColor,
+            ctx.FillPolygon(_noAaOptions, bgColor,
                 new PointF(x, y),
                 new PointF(x + width, y),
                 new PointF(x + width, y + barHeight),
@@ -605,7 +482,7 @@ public class DrawingService
             {
                 image.Mutate(ctx =>
                 {
-                    ctx.FillPolygon(fillColor,
+                    ctx.FillPolygon(_noAaOptions, fillColor,
                         new PointF(x, y),
                         new PointF(x + progressWidth, y),
                         new PointF(x + progressWidth, y + barHeight),
@@ -617,7 +494,7 @@ public class DrawingService
         // Border
         image.Mutate(ctx =>
         {
-            ctx.DrawPolygon(fillColor, 1,
+            ctx.DrawPolygon(_noAaOptions, fillColor, 1,
                 new PointF(x, y),
                 new PointF(x + width, y),
                 new PointF(x + width, y + barHeight),
@@ -646,6 +523,15 @@ public class DrawingService
             {
                 var idx = y * width + x;
                 var pixel = working[x, y];
+
+                // Skip dithering for pure black or pure white pixels to preserve sharp edges
+                // and solid areas (like text and QR codes)
+                if (pixel.PackedValue == 0 || pixel.PackedValue == 255)
+                {
+                    working[x, y] = pixel;
+                    continue;
+                }
+
                 var value = pixel.PackedValue + errorBuffer[idx] * DitheringStrength;
 
                 // Clamp value to valid range
@@ -816,16 +702,16 @@ public class DrawingService
                     var rad = angle * Math.PI / 180;
                     var px = centerX + (int)(markerSize * Math.Cos(rad));
                     var py = centerY + (int)(markerSize * Math.Sin(rad));
-                    ctx.DrawLine(Color.Black, 2, new PointF(centerX, centerY), new PointF(px, py));
+                    ctx.DrawLine(_noAaOptions, Color.Black, 2, new PointF(centerX, centerY), new PointF(px, py));
                 }
                 // Inner white dot
-                ctx.FillPolygon(Color.White,
+                ctx.FillPolygon(_noAaOptions, Color.White,
                     new PointF(centerX - 3, centerY - 3),
                     new PointF(centerX + 3, centerY - 3),
                     new PointF(centerX + 3, centerY + 3),
                     new PointF(centerX - 3, centerY + 3));
                 // Center black dot
-                ctx.FillPolygon(Color.Black,
+                ctx.FillPolygon(_noAaOptions, Color.Black,
                     new PointF(centerX - 1, centerY - 1),
                     new PointF(centerX + 1, centerY - 1),
                     new PointF(centerX + 1, centerY + 1),
@@ -835,7 +721,7 @@ public class DrawingService
             // Draw border around map
             image.Mutate(ctx =>
             {
-                ctx.DrawPolygon(Color.Black, 2,
+                ctx.DrawPolygon(_noAaOptions, Color.Black, 2,
                     new PointF(x, y),
                     new PointF(x + size, y),
                     new PointF(x + size, y + size),
@@ -883,7 +769,7 @@ public class DrawingService
         image.Mutate(ctx =>
         {
             // Fill background
-            ctx.FillPolygon(lightGray,
+            ctx.FillPolygon(_noAaOptions, lightGray,
                 new PointF(x, y),
                 new PointF(x + size, y),
                 new PointF(x + size, y + size),
@@ -893,18 +779,18 @@ public class DrawingService
             for (int i = 1; i < 4; i++)
             {
                 var offset = size * i / 4;
-                ctx.DrawLine(mediumGray, 1, new PointF(x + offset, y), new PointF(x + offset, y + size));
-                ctx.DrawLine(mediumGray, 1, new PointF(x, y + offset), new PointF(x + size, y + offset));
+                ctx.DrawLine(_noAaOptions, mediumGray, 1, new PointF(x + offset, y), new PointF(x + offset, y + size));
+                ctx.DrawLine(_noAaOptions, mediumGray, 1, new PointF(x, y + offset), new PointF(x + size, y + offset));
             }
 
             // Draw crosshair at center
             var centerX = x + size / 2;
             var centerY = y + size / 2;
-            ctx.DrawLine(Color.Black, 2, new PointF(centerX - 10, centerY), new PointF(centerX + 10, centerY));
-            ctx.DrawLine(Color.Black, 2, new PointF(centerX, centerY - 10), new PointF(centerX, centerY + 10));
+            ctx.DrawLine(_noAaOptions, Color.Black, 2, new PointF(centerX - 10, centerY), new PointF(centerX + 10, centerY));
+            ctx.DrawLine(_noAaOptions, Color.Black, 2, new PointF(centerX, centerY - 10), new PointF(centerX, centerY + 10));
 
             // Draw border
-            ctx.DrawPolygon(Color.Black, 2,
+            ctx.DrawPolygon(_noAaOptions, Color.Black, 2,
                 new PointF(x, y),
                 new PointF(x + size, y),
                 new PointF(x + size, y + size),
@@ -912,11 +798,7 @@ public class DrawingService
 
             // Draw coordinates at bottom
             var coordText = $"{lat:F3}, {lon:F3}";
-            var options = new RichTextOptions(font)
-            {
-                Origin = new PointF(x + 5, y + size - 15)
-            };
-            ctx.DrawText(options, coordText, Color.Black);
+            ctx.DrawText(_noAaOptions, coordText, font, Color.Black, new PointF(x + 5, y + size - 15));
         });
     }
 
