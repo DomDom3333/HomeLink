@@ -1,0 +1,18 @@
+﻿{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "http": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": false,
+      "applicationUrl": "http://0.0.0.0:5119;https://localhost:7239",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "SPOTIFY_REFRESH_TOKEN": "AQDZdqG-T8MHdwgMpIIycWOwsi_nc2HFeMLTLlakkbt9qw8C-RiWlid2uQHdRNZoh7hOGjd5TVHM48tCsSja9zZCG5gHgwge-YkB4-66wyaVdz9fm7kk0Faiw6P1IJIW4-E",
+        "SPOTIFY_ID": "c44e882bbd0f47c1b99573a0fb955023",
+        "SPOTIFY_SECRET": "da049393489a4fb79c1313058c195338",
+        "KNOWN_LOCATIONS": "home|Home|48.25890085|15.555724704875526|100;work|Work|48.2030795|16.3918152|150;kathis|Kathi's|48.1494469|16.2942323|100"
+      }
+    }
+  }
+}

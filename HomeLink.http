@@ -1,0 +1,32 @@
+@HomeLink_HostAddress = http://localhost:5119
+###
+
+### Render full display (location + spotify)
+GET {{HomeLink_HostAddress}}/api/display/render
+Accept: application/json
+
+###
+
+### Render Spotify only (useful for testing spotify section)
+GET {{HomeLink_HostAddress}}/api/display/render-spotify-only
+Accept: application/json
+
+###
+
+### Render Location only (location data only)
+GET {{HomeLink_HostAddress}}/api/display/render-location-only?latitude=48.2082&longitude=16.3738
+Accept: application/json
+
+###
+
+GET {{HomeLink_HostAddress}}/api/spotify/authorize
+Accept: application/json
+###
+
+GET {{HomeLink_HostAddress}}/api/spotify/status
+Accept: application/json
+###
+
+GET {{HomeLink_HostAddress}}/api/spotify/info
+Accept: application/json
+
