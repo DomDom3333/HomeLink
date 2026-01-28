@@ -240,36 +240,39 @@ public class DrawingService
             var coordsY = bottomY + 85;
             image.Mutate(ctx => ctx.DrawText(_noAaOptions, coordsText, smallFont, darkGray, new PointF(infoX, coordsY)));
 
-            // Device status line (battery, accuracy, speed, connection)
-            var deviceStatusParts = new List<string>();
+            // Device status line (battery icon + percent, accuracy, speed, connection)
+            var deviceStatusY = bottomY + 105;
+            var nextX = infoX;
+            var otherStatusParts = new List<string>();
             
             if (locationData.BatteryLevel.HasValue)
             {
-                var batteryIcon = locationData.BatteryLevel.Value switch
-                {
-                    >= 80 => "[====]",
-                    >= 60 => "[=== ]",
-                    >= 40 => "[==  ]",
-                    >= 20 => "[=   ]",
-                    _ => "[!   ]"
-                };
-                var chargingIndicator = locationData.BatteryStatus switch
-                {
-                    2 => "+",  // charging
-                    3 => "*",  // full
-                    _ => ""
-                };
-                deviceStatusParts.Add($"{batteryIcon}{chargingIndicator} {locationData.BatteryLevel}%");
+                // Draw battery icon
+                int batteryWidth = 28;
+                int batteryHeight = 12;
+                int iconOffsetY = 2; // align with text
+                DrawBatteryIcon(image, nextX, deviceStatusY + iconOffsetY, batteryWidth, batteryHeight,
+                    Math.Clamp(locationData.BatteryLevel.Value, 0, 100), locationData.BatteryStatus, darkGray, darkGray);
+
+                nextX += batteryWidth + 6; // space after icon
+
+                // Draw battery percent text
+                var percentText = $"{locationData.BatteryLevel}%";
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, percentText, smallFont, darkGray, new PointF(nextX, deviceStatusY)));
+                // Advance by an estimated width (~8px per character at this font size) plus spacing
+                var approxWidth = percentText.Length * 8;
+                nextX += approxWidth + 12; // add spacing before other parts
             }
-            
+
+            // Build remaining status parts
             if (locationData.Accuracy.HasValue)
             {
-                deviceStatusParts.Add($"±{locationData.Accuracy}m");
+                otherStatusParts.Add($"±{locationData.Accuracy}m");
             }
             
             if (locationData.Velocity.HasValue && locationData.Velocity.Value > 0)
             {
-                deviceStatusParts.Add($"{locationData.Velocity} km/h");
+                otherStatusParts.Add($"{locationData.Velocity} km/h");
             }
             
             if (!string.IsNullOrEmpty(locationData.Connection))
@@ -281,14 +284,13 @@ public class DrawingService
                     "o" => "Offline",
                     _ => locationData.Connection
                 };
-                deviceStatusParts.Add(connText);
+                otherStatusParts.Add(connText);
             }
 
-            if (deviceStatusParts.Count > 0)
+            if (otherStatusParts.Count > 0)
             {
-                var deviceStatusText = string.Join("  •  ", deviceStatusParts);
-                var deviceStatusY = bottomY + 105;
-                image.Mutate(ctx => ctx.DrawText(_noAaOptions, deviceStatusText, smallFont, darkGray, new PointF(infoX, deviceStatusY)));
+                var restText = (locationData.BatteryLevel.HasValue ? "•  " : string.Empty) + string.Join("  •  ", otherStatusParts);
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, restText, smallFont, darkGray, new PointF(nextX, deviceStatusY)));
             }
 
             // Known location indicator (if matched)
@@ -369,18 +371,8 @@ public class DrawingService
         // HomeLink branding
         image.Mutate(ctx => ctx.DrawText(_noAaOptions, "HomeLink", tinyFont, mediumGray, new PointF(DisplayWidth - 100, footerY)));
 
-        // Save debug image (grayscale before dithering)
-        var debugPath = Path.Combine(Path.GetTempPath(), "homelink_debug_grayscale.png");
-        await image.SaveAsPngAsync(debugPath);
-        _logger.LogInformation("Debug grayscale image saved to: {DebugPath}", debugPath);
-
         // Apply Floyd-Steinberg dithering for 1-bit conversion
         var ditheredBitmap = DitherImage(image);
-
-        // Save debug image (after dithering)
-        var debugDitheredPath = Path.Combine(Path.GetTempPath(), "homelink_debug_dithered.png");
-        await ditheredBitmap.SaveAsPngAsync(debugDitheredPath);
-        _logger.LogInformation("Debug dithered image saved to: {DebugDitheredPath}", debugDitheredPath);
 
         // Convert to packed 1-bit format
         var einkBitmap = ConvertToPacked1Bit(ditheredBitmap);
@@ -549,6 +541,77 @@ public class DrawingService
                     new PointF(x + size, y),
                     new PointF(x + size, y + size),
                     new PointF(x + size - barWidth, y + size));
+            }
+        });
+    }
+
+    /// <summary>
+    /// Draws a battery icon with fill level and optional charging indicator.
+    /// </summary>
+    private void DrawBatteryIcon(Image<L8> image, int x, int y, int width, int height, int levelPercent, int? batteryStatus, Color outlineColor, Color fillColor)
+    {
+        // Clamp inputs
+        levelPercent = Math.Clamp(levelPercent, 0, 100);
+        if (width < 10) width = 10;
+        if (height < 8) height = 8;
+
+        // Terminal cap dimensions
+        var capWidth = Math.Max(2, width / 8);
+        var bodyWidth = width - capWidth - 1;
+
+        // Battery body (rectangle)
+        image.Mutate(ctx =>
+        {
+            // Body border
+            ctx.DrawPolygon(_noAaOptions, outlineColor, 1,
+                new PointF(x, y),
+                new PointF(x + bodyWidth, y),
+                new PointF(x + bodyWidth, y + height),
+                new PointF(x, y + height));
+
+            // Terminal cap
+            var capX = x + bodyWidth + 1;
+            var capTop = y + height / 3f;
+            var capBottom = y + height - height / 3f;
+            ctx.FillPolygon(_noAaOptions, outlineColor,
+                new PointF(capX, capTop),
+                new PointF(capX + capWidth, capTop),
+                new PointF(capX + capWidth, capBottom),
+                new PointF(capX, capBottom));
+
+            // Fill level inside body (leave 2px padding)
+            var innerX = x + 2;
+            var innerY = y + 2;
+            var innerW = Math.Max(0, bodyWidth - 4);
+            var innerH = Math.Max(0, height - 4);
+            var fillW = (int)Math.Round(innerW * (levelPercent / 100.0));
+            if (fillW > 0)
+            {
+                ctx.FillPolygon(_noAaOptions, fillColor,
+                    new PointF(innerX, innerY),
+                    new PointF(innerX + fillW, innerY),
+                    new PointF(innerX + fillW, innerY + innerH),
+                    new PointF(innerX, innerY + innerH));
+            }
+
+            // If charging, draw a simple lightning bolt overlay
+            if (batteryStatus == 2) // charging
+            {
+                var boltCenterX = x + bodyWidth / 2f;
+                var boltTop = y + 2;
+                var boltBottom = y + height - 2;
+                var boltW = Math.Max(2f, bodyWidth * 0.20f);
+                var boltMidY = (boltTop + boltBottom) / 2f;
+                var boltPoints = new PointF[]
+                {
+                    new PointF(boltCenterX - boltW * 0.3f, boltTop),
+                    new PointF(boltCenterX + boltW * 0.5f, boltTop),
+                    new PointF(boltCenterX - boltW * 0.2f, boltMidY),
+                    new PointF(boltCenterX + boltW * 0.4f, boltMidY),
+                    new PointF(boltCenterX - boltW * 0.7f, boltBottom),
+                    new PointF(boltCenterX - boltW * 0.3f, boltMidY)
+                };
+                ctx.FillPolygon(_noAaOptions, Color.Black, boltPoints);
             }
         });
     }
@@ -1053,32 +1116,31 @@ public class DrawingService
             var coordsText = $"GPS: {locationData.Latitude:F5}, {locationData.Longitude:F5}";
             var coordsY = bottomY + 85;
             image.Mutate(ctx => ctx.DrawText(_noAaOptions, coordsText, smallFont, darkGray, new PointF(infoX, coordsY)));
-            var deviceStatusParts = new List<string>();
+
+            // Device status row
+            var deviceStatusY = bottomY + 105;
+            var nextX = infoX;
+            var otherStatusParts = new List<string>();
             if (locationData.BatteryLevel.HasValue)
             {
-                var batteryIcon = locationData.BatteryLevel.Value switch
-                {
-                    >= 80 => "[====]",
-                    >= 60 => "[=== ]",
-                    >= 40 => "[==  ]",
-                    >= 20 => "[=   ]",
-                    _ => "[!   ]"
-                };
-                var chargingIndicator = locationData.BatteryStatus switch
-                {
-                    2 => "+",
-                    3 => "*",
-                    _ => ""
-                };
-                deviceStatusParts.Add($"{batteryIcon}{chargingIndicator} {locationData.BatteryLevel}%");
+                int batteryWidth = 28;
+                int batteryHeight = 12;
+                DrawBatteryIcon(image, nextX, deviceStatusY + 2, batteryWidth, batteryHeight,
+                    Math.Clamp(locationData.BatteryLevel.Value, 0, 100), locationData.BatteryStatus, darkGray, darkGray);
+                nextX += batteryWidth + 6;
+
+                var percentText = $"{locationData.BatteryLevel}%";
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, percentText, smallFont, darkGray, new PointF(nextX, deviceStatusY)));
+                var approxWidth = percentText.Length * 8;
+                nextX += approxWidth + 12;
             }
             if (locationData.Accuracy.HasValue)
             {
-                deviceStatusParts.Add($"±{locationData.Accuracy}m");
+                otherStatusParts.Add($"±{locationData.Accuracy}m");
             }
             if (locationData.Velocity.HasValue && locationData.Velocity.Value > 0)
             {
-                deviceStatusParts.Add($"{locationData.Velocity} km/h");
+                otherStatusParts.Add($"{locationData.Velocity} km/h");
             }
             if (!string.IsNullOrEmpty(locationData.Connection))
             {
@@ -1089,13 +1151,12 @@ public class DrawingService
                     "o" => "Offline",
                     _ => locationData.Connection
                 };
-                deviceStatusParts.Add(connText);
+                otherStatusParts.Add(connText);
             }
-            if (deviceStatusParts.Count > 0)
+            if (otherStatusParts.Count > 0)
             {
-                var deviceStatusText = string.Join("  •  ", deviceStatusParts);
-                var deviceStatusY = bottomY + 105;
-                image.Mutate(ctx => ctx.DrawText(_noAaOptions, deviceStatusText, smallFont, darkGray, new PointF(infoX, deviceStatusY)));
+                var restText = (locationData.BatteryLevel.HasValue ? "•  " : string.Empty) + string.Join("  •  ", otherStatusParts);
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, restText, smallFont, darkGray, new PointF(nextX, deviceStatusY)));
             }
             if (locationData.MatchedKnownLocation != null)
             {
@@ -1122,20 +1183,27 @@ public class DrawingService
                 var distY = bottomY + 160;
                 image.Mutate(ctx => ctx.DrawText(_noAaOptions, distanceText, tinyFont, darkGray, new PointF(infoX, distY)));
             }
+            // === RIGHT: Maps QR Code ===
             var lat = locationData.Latitude.ToString(System.Globalization.CultureInfo.InvariantCulture);
             var lon = locationData.Longitude.ToString(System.Globalization.CultureInfo.InvariantCulture);
             var mapsUrl = $"https://maps.google.com/?q={lat},{lon}";
             var mapsQrX = DisplayWidth - SmallQrCodeSize - Margin;
             var mapsQrY = bottomY + 10;
+
             DrawQrCode(image, mapsUrl, mapsQrX, mapsQrY, SmallQrCodeSize);
+
+            // Label under Maps QR code
             var mapsLabelY = mapsQrY + SmallQrCodeSize + 5;
             image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Open in Maps", tinyFont, darkGray, new PointF(mapsQrX + 5, mapsLabelY)));
         }
         else
         {
+            // No location data - draw placeholder
             var noLocY = bottomY + 50;
             var noLocX = Margin + mapSize + Margin;
             image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Location not available", largeFont, mediumGray, new PointF(noLocX, noLocY)));
+
+            // Draw a placeholder map outline
             image.Mutate(ctx =>
             {
                 ctx.DrawPolygon(_noAaOptions, lightGray, 2,
@@ -1143,15 +1211,21 @@ public class DrawingService
                     new PointF(Margin + mapSize, bottomY),
                     new PointF(Margin + mapSize, bottomY + mapSize),
                     new PointF(Margin, bottomY + mapSize));
+                
+                // Draw X through it
                 ctx.DrawLine(_noAaOptions, lightGray, 1, new PointF(Margin, bottomY), new PointF(Margin + mapSize, bottomY + mapSize));
                 ctx.DrawLine(_noAaOptions, lightGray, 1, new PointF(Margin + mapSize, bottomY), new PointF(Margin, bottomY + mapSize));
             });
         }
 
-        // Footer
+        // ============================================================
+        // FOOTER
+        // ============================================================
         var footerY = DisplayHeight - Margin - 12;
         var timestamp = DateTime.Now.ToString("MMM dd, yyyy  HH:mm");
         image.Mutate(ctx => ctx.DrawText(_noAaOptions, $"Updated: {timestamp}", tinyFont, mediumGray, new PointF(Margin, footerY)));
+
+        // HomeLink branding
         image.Mutate(ctx => ctx.DrawText(_noAaOptions, "HomeLink", tinyFont, mediumGray, new PointF(DisplayWidth - 100, footerY)));
 
         // Dither for 1-bit preview (matches e-ink look)
