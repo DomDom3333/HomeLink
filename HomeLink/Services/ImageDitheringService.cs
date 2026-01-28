@@ -9,92 +9,144 @@ namespace HomeLink.Services;
 /// </summary>
 public class ImageDitheringService
 {
-    private const float DitheringStrength = 1.0f;
+    // Pre-computed Floyd-Steinberg coefficients
+    private const float Coeff7_16 = 7f / 16f;
+    private const float Coeff3_16 = 3f / 16f;
+    private const float Coeff5_16 = 5f / 16f;
+    private const float Coeff1_16 = 1f / 16f;
 
     /// <summary>
     /// Applies Floyd-Steinberg dithering to convert grayscale to 1-bit
+    /// Uses ProcessPixelRows for efficient memory access
     /// </summary>
     public Image<L8> DitherImage(Image<L8> image)
     {
         int width = image.Width;
         int height = image.Height;
 
-        // Create error accumulation buffer
-        float[] errorBuffer = new float[width * height];
-
         // Copy image to work with
         Image<L8> working = image.Clone();
 
-        // Floyd-Steinberg dithering
-        for (int y = 0; y < height; y++)
+        // Use two row error buffers instead of full image buffer (saves memory)
+        // currentRowError for current row, nextRowError for next row
+        float[] currentRowError = new float[width];
+        float[] nextRowError = new float[width];
+
+        // Process rows using efficient span-based access
+        working.ProcessPixelRows(accessor =>
         {
-            for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
             {
-                int idx = y * width + x;
-                L8 pixel = working[x, y];
+                Span<L8> row = accessor.GetRowSpan(y);
+                bool hasNextRow = y + 1 < height;
 
-                // Skip dithering for pure black or pure white pixels to preserve sharp edges
-                // and solid areas (like text and QR codes)
-                if (pixel.PackedValue == 0 || pixel.PackedValue == 255)
+                for (int x = 0; x < width; x++)
                 {
-                    working[x, y] = pixel;
-                    continue;
-                }
+                    byte pixelValue = row[x].PackedValue;
 
-                float value = pixel.PackedValue + errorBuffer[idx] * DitheringStrength;
+                    // Skip dithering for pure black or pure white pixels to preserve sharp edges
+                    // and solid areas (like text and QR codes)
+                    if (pixelValue == 0 || pixelValue == 255)
+                    {
+                        continue;
+                    }
 
-                // Clamp value to valid range
-                value = Math.Max(0, Math.Min(255, value));
+                    // Apply accumulated error
+                    float value = pixelValue + currentRowError[x];
 
-                // Quantize to black or white
-                byte quantized = value < 128 ? (byte)0 : (byte)255;
-                float error = value - quantized;
+                    // Clamp value to valid range
+                    value = Math.Clamp(value, 0f, 255f);
 
-                working[x, y] = new L8(quantized);
+                    // Quantize to black or white
+                    byte quantized = value < 128f ? (byte)0 : (byte)255;
+                    float error = value - quantized;
 
-                // Distribute error to neighboring pixels
-                if (x + 1 < width)
-                    errorBuffer[idx + 1] += error * 7f / 16f;
-                if (y + 1 < height)
-                {
-                    if (x > 0)
-                        errorBuffer[idx + width - 1] += error * 3f / 16f;
-                    errorBuffer[idx + width] += error * 5f / 16f;
+                    row[x] = new L8(quantized);
+
+                    // Distribute error to neighboring pixels (Floyd-Steinberg pattern)
                     if (x + 1 < width)
-                        errorBuffer[idx + width + 1] += error * 1f / 16f;
+                        currentRowError[x + 1] += error * Coeff7_16;
+
+                    if (hasNextRow)
+                    {
+                        if (x > 0)
+                            nextRowError[x - 1] += error * Coeff3_16;
+                        nextRowError[x] += error * Coeff5_16;
+                        if (x + 1 < width)
+                            nextRowError[x + 1] += error * Coeff1_16;
+                    }
                 }
+
+                // Swap buffers and clear for next iteration
+                (currentRowError, nextRowError) = (nextRowError, currentRowError);
+                Array.Clear(nextRowError);
             }
-        }
+        });
 
         return working;
     }
 
     /// <summary>
-    /// Converts an image to packed 1-bit format
+    /// Converts an image to packed 1-bit format using efficient span-based access
     /// </summary>
     public EInkBitmap ConvertToPacked1Bit(Image<L8> image)
     {
         int width = image.Width;
         int height = image.Height;
-        int bytesPerLine = (width + 7) / 8;
+        int bytesPerLine = (width + 7) >> 3; // Equivalent to / 8
         int totalBytes = bytesPerLine * height;
 
         byte[] packedData = new byte[totalBytes];
 
-        for (int y = 0; y < height; y++)
+        // Process rows efficiently using span-based access
+        image.ProcessPixelRows(accessor =>
         {
-            for (int x = 0; x < width; x++)
+            for (int y = 0; y < height; y++)
             {
-                L8 pixel = image[x, y];
-                // 0 = black (1 in 1-bit), 255 = white (0 in 1-bit)
-                int bit = pixel.PackedValue < 128 ? 1 : 0;
+                ReadOnlySpan<L8> row = accessor.GetRowSpan(y);
+                int rowOffset = y * bytesPerLine;
 
-                int byteIdx = y * bytesPerLine + x / 8;
-                int bitIdx = 7 - (x % 8); // MSB first
+                // Process 8 pixels at a time for efficiency
+                int fullBytes = width >> 3; // Number of complete bytes
+                int remaining = width & 7;   // Remaining pixels (width % 8)
 
-                packedData[byteIdx] |= (byte)(bit << bitIdx);
+                for (int byteIndex = 0; byteIndex < fullBytes; byteIndex++)
+                {
+                    int pixelStart = byteIndex << 3; // byteIndex * 8
+                    byte packedByte = 0;
+
+                    // Process 8 pixels into one byte (MSB first)
+                    // Unrolled loop for performance
+                    if (row[pixelStart].PackedValue < 128) packedByte |= 0b10000000;
+                    if (row[pixelStart + 1].PackedValue < 128) packedByte |= 0b01000000;
+                    if (row[pixelStart + 2].PackedValue < 128) packedByte |= 0b00100000;
+                    if (row[pixelStart + 3].PackedValue < 128) packedByte |= 0b00010000;
+                    if (row[pixelStart + 4].PackedValue < 128) packedByte |= 0b00001000;
+                    if (row[pixelStart + 5].PackedValue < 128) packedByte |= 0b00000100;
+                    if (row[pixelStart + 6].PackedValue < 128) packedByte |= 0b00000010;
+                    if (row[pixelStart + 7].PackedValue < 128) packedByte |= 0b00000001;
+
+                    packedData[rowOffset + byteIndex] = packedByte;
+                }
+
+                // Handle remaining pixels in the last partial byte
+                if (remaining > 0)
+                {
+                    int pixelStart = fullBytes << 3;
+                    byte packedByte = 0;
+
+                    for (int bit = 0; bit < remaining; bit++)
+                    {
+                        if (row[pixelStart + bit].PackedValue < 128)
+                        {
+                            packedByte |= (byte)(0x80 >> bit);
+                        }
+                    }
+
+                    packedData[rowOffset + fullBytes] = packedByte;
+                }
             }
-        }
+        });
 
         return new EInkBitmap
         {
