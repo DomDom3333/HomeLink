@@ -156,5 +156,41 @@ public class ImageDitheringService
             BytesPerLine = bytesPerLine
         };
     }
+
+    /// <summary>
+    /// Converts an image to raw grayscale bytes (8 bits per pixel, no dithering)
+    /// </summary>
+    public EInkBitmap ConvertToGrayscaleBitmap(Image<L8> image)
+    {
+        int width = image.Width;
+        int height = image.Height;
+        int bytesPerLine = width; // 1 byte per pixel
+        int totalBytes = bytesPerLine * height;
+
+        byte[] grayscaleData = new byte[totalBytes];
+
+        // Process rows efficiently using span-based access
+        image.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < height; y++)
+            {
+                ReadOnlySpan<L8> row = accessor.GetRowSpan(y);
+                int rowOffset = y * bytesPerLine;
+
+                for (int x = 0; x < width; x++)
+                {
+                    grayscaleData[rowOffset + x] = row[x].PackedValue;
+                }
+            }
+        });
+
+        return new EInkBitmap
+        {
+            PackedData = grayscaleData,
+            Width = width,
+            Height = height,
+            BytesPerLine = bytesPerLine
+        };
+    }
 }
 

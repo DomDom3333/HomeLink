@@ -77,7 +77,10 @@ public class DrawingService
     /// Creates an e-ink bitmap combining Spotify and location information
     /// Horizontal layout for Lilygo T5 e-ink display
     /// </summary>
-    public async Task<EInkBitmap> DrawDisplayDataAsync(SpotifyTrackInfo? spotifyData, LocationInfo? locationData)
+    /// <param name="spotifyData">Spotify track information</param>
+    /// <param name="locationData">Location information</param>
+    /// <param name="dither">Whether to apply dithering (default true)</param>
+    public async Task<EInkBitmap> DrawDisplayDataAsync(SpotifyTrackInfo? spotifyData, LocationInfo? locationData, bool dither = true)
     {
         // Create a grayscale image at display resolution (horizontal)
         using Image<L8> image = new Image<L8>(DisplayWidth, DisplayHeight, new L8(255)); // White background
@@ -87,18 +90,28 @@ public class DrawingService
         // Draw dynamic content (album art, map)
         await DrawDynamicContentAsync(image, spotifyData, locationData);
 
-        // Apply Floyd-Steinberg dithering for 1-bit conversion
-        using Image<L8> ditheredBitmap = _ditheringService.DitherImage(image);
-
-        // Convert to packed 1-bit format
-        return _ditheringService.ConvertToPacked1Bit(ditheredBitmap);
+        if (dither)
+        {
+            // Apply Floyd-Steinberg dithering for 1-bit conversion
+            using Image<L8> ditheredBitmap = _ditheringService.DitherImage(image);
+            // Convert to packed 1-bit format
+            return _ditheringService.ConvertToPacked1Bit(ditheredBitmap);
+        }
+        else
+        {
+            // Return grayscale without dithering
+            return _ditheringService.ConvertToGrayscaleBitmap(image);
+        }
     }
 
 
     /// <summary>
     /// Renders the display image as PNG bytes for browser display
     /// </summary>
-    public async Task<byte[]> RenderDisplayPngAsync(SpotifyTrackInfo? spotifyData, LocationInfo? locationData)
+    /// <param name="spotifyData">Spotify track information</param>
+    /// <param name="locationData">Location information</param>
+    /// <param name="dither">Whether to apply dithering (default true)</param>
+    public async Task<byte[]> RenderDisplayPngAsync(SpotifyTrackInfo? spotifyData, LocationInfo? locationData, bool dither = true)
     {
         // Create a grayscale image at display resolution (horizontal)
         using Image<L8> image = new Image<L8>(DisplayWidth, DisplayHeight, new L8(255)); // White background
@@ -106,10 +119,20 @@ public class DrawingService
         DrawContent(image, spotifyData, locationData);
         await DrawDynamicContentAsync(image, spotifyData, locationData);
 
-        // Dither for 1-bit preview (matches e-ink look)
-        using Image<L8> dithered = _ditheringService.DitherImage(image);
         using MemoryStream ms = new MemoryStream();
-        await dithered.SaveAsPngAsync(ms);
+        
+        if (dither)
+        {
+            // Dither for 1-bit preview (matches e-ink look)
+            using Image<L8> dithered = _ditheringService.DitherImage(image);
+            await dithered.SaveAsPngAsync(ms);
+        }
+        else
+        {
+            // Return undithered grayscale image
+            await image.SaveAsPngAsync(ms);
+        }
+        
         return ms.ToArray();
     }
 

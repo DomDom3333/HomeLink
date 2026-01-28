@@ -25,9 +25,10 @@ public class DisplayController : ControllerBase
     /// applies Floyd-Steinberg dithering, and converts to 1-bit packed format.
     /// Uses cached location from OwnTracks updates.
     /// </summary>
+    /// <param name="dither">Whether to apply dithering (default true). Set to false for grayscale output.</param>
     /// <returns>Binary bitmap data ready to send to e-ink display</returns>
     [HttpGet("render")]
-    public async Task<ActionResult<dynamic>> RenderDisplay()
+    public async Task<ActionResult<dynamic>> RenderDisplay([FromQuery] bool dither = true)
     {
         if (!_spotifyService.IsAuthorized)
         {
@@ -43,11 +44,12 @@ public class DisplayController : ControllerBase
             LocationInfo? locationData = _locationService.GetCachedLocation();
 
             // Draw the display (async to support album art download)
-            EInkBitmap bitmap = await _drawingService.DrawDisplayDataAsync(spotifyData, locationData);
+            EInkBitmap bitmap = await _drawingService.DrawDisplayDataAsync(spotifyData, locationData, dither);
 
             return Ok(new
             {
                 success = true,
+                dithered = dither,
                 bitmap = new
                 {
                     width = bitmap.Width,
@@ -66,9 +68,10 @@ public class DisplayController : ControllerBase
     /// <summary>
     /// Renders the display image as a PNG file.
     /// </summary>
+    /// <param name="dither">Whether to apply dithering (default true). Set to false for grayscale output.</param>
     /// <returns>PNG image file of the current display</returns>
     [HttpGet("image")]
-    public async Task<IActionResult> RenderDisplayImage()
+    public async Task<IActionResult> RenderDisplayImage([FromQuery] bool dither = true)
     {
         if (!_spotifyService.IsAuthorized)
         {
@@ -79,7 +82,7 @@ public class DisplayController : ControllerBase
         {
             SpotifyTrackInfo? spotifyData = await _spotifyService.GetCurrentlyPlayingAsync();
             LocationInfo? locationData = _locationService.GetCachedLocation();
-            byte[] pngBytes = await _drawingService.RenderDisplayPngAsync(spotifyData, locationData);
+            byte[] pngBytes = await _drawingService.RenderDisplayPngAsync(spotifyData, locationData, dither);
             return File(pngBytes, "image/png");
         }
         catch (Exception ex)
