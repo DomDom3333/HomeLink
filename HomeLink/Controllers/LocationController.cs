@@ -199,26 +199,4 @@ public class LocationController : ControllerBase
             return StatusCode(500, new { error = "Failed to process location update" });
         }
     }
-
-    /// <summary>
-    /// Gets the currently cached location.
-    /// </summary>
-    [HttpGet("current")]
-    public ActionResult<object> GetCurrentLocation()
-    {
-        var cachedLocation = _locationService.GetCachedLocation();
-        var timestamp = _locationService.GetCachedLocationTimestamp();
-
-        if (cachedLocation == null)
-        {
-            return NotFound(new { error = "No location cached. Send a location update first." });
-        }
-
-        return Ok(new
-        {
-            location = cachedLocation,
-            cachedAt = timestamp,
-            ageSeconds = (DateTime.UtcNow - timestamp).TotalSeconds
-        });
-    }
 }
