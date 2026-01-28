@@ -934,6 +934,230 @@ public class DrawingService
     {
         return degrees * Math.PI / 180;
     }
+
+    /// <summary>
+    /// Renders the display image as PNG bytes for browser display
+    /// Similar to DrawDisplayDataAsync but without altering existing methods
+    /// </summary>
+    public async Task<byte[]> RenderDisplayPngAsync(SpotifyTrackInfo? spotifyData, LocationInfo? locationData)
+    {
+        // Create a grayscale image at display resolution (horizontal)
+        using var image = new Image<L8>(DisplayWidth, DisplayHeight, new L8(255)); // White background
+
+        var font = _fontFamily.CreateFont(20);
+        var titleFont = _fontFamily.CreateFont(32, FontStyle.Bold);
+        var largeFont = _fontFamily.CreateFont(26);
+        var smallFont = _fontFamily.CreateFont(16);
+        var smallBoldFont = _fontFamily.CreateFont(16, FontStyle.Bold);
+        var tinyFont = _fontFamily.CreateFont(13);
+
+        var black = Color.Black;
+        var darkGray = new Color(new Rgba32(64, 64, 64));
+        var mediumGray = new Color(new Rgba32(100, 100, 100));
+        var lightGray = new Color(new Rgba32(160, 160, 160));
+
+        // Layout constants mirroring DrawDisplayDataAsync
+        var leftColumnWidth = AlbumArtSize + Margin * 2;
+        var rightColumnWidth = QrCodeSize + Margin * 2;
+        var centerColumnWidth = DisplayWidth - leftColumnWidth - rightColumnWidth;
+        var topSectionHeight = 290; // Music section height
+
+        // === LEFT: Album Art ===
+        if (spotifyData != null && !string.IsNullOrEmpty(spotifyData.AlbumCoverUrl))
+        {
+            await DrawAlbumArtAsync(image, spotifyData.AlbumCoverUrl, Margin, Margin, AlbumArtSize);
+        }
+        else
+        {
+            DrawPlaceholder(image, Margin, Margin, AlbumArtSize, "No Album Art", font, mediumGray);
+        }
+
+        // === CENTER: Track Info ===
+        var centerX = leftColumnWidth;
+        var yPos = Margin;
+
+        if (spotifyData != null)
+        {
+            var statusY = yPos;
+            var statusText = spotifyData.IsPlaying ? "PLAYING" : "PAUSED";
+            DrawPlaybackIcon(image, spotifyData.IsPlaying, centerX, statusY + 4, 12, darkGray);
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, statusText, smallBoldFont, darkGray, new PointF(centerX + 20, statusY)));
+            yPos += 25;
+
+            var trackText = TruncateText(spotifyData.Title, 30);
+            var titleY = yPos;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, trackText, titleFont, black, new PointF(centerX, titleY)));
+            yPos += 45;
+
+            var artistText = TruncateText(spotifyData.Artist, 35);
+            var artistY = yPos;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, artistText, largeFont, darkGray, new PointF(centerX, artistY)));
+            yPos += 35;
+
+            var albumText = TruncateText(spotifyData.Album, 40);
+            var albumY = yPos;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, albumText, font, mediumGray, new PointF(centerX, albumY)));
+            yPos += 35;
+
+            var barWidth = centerColumnWidth - Margin * 2;
+            DrawProgressBar(image, spotifyData.ProgressMs, spotifyData.DurationMs, centerX, yPos, barWidth, black, lightGray);
+            yPos += 20;
+
+            var progressText = $"{FormatTime(spotifyData.ProgressMs)} / {FormatTime(spotifyData.DurationMs)}";
+            var timeY = yPos;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, progressText, smallFont, darkGray, new PointF(centerX, timeY)));
+        }
+        else
+        {
+            var noTrackY = yPos + 50;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Nothing Playing", titleFont, mediumGray, new PointF(centerX, noTrackY)));
+        }
+
+        // === RIGHT: Spotify QR Code ===
+        var spotifyQrX = DisplayWidth - QrCodeSize - Margin;
+        var spotifyQrY = Margin;
+
+        if (spotifyData != null && !string.IsNullOrEmpty(spotifyData.SpotifyUri))
+        {
+            DrawQrCode(image, spotifyData.SpotifyUri, spotifyQrX, spotifyQrY, QrCodeSize);
+            var spotifyLabelY = spotifyQrY + QrCodeSize + 5;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Scan to Play", tinyFont, darkGray, new PointF(spotifyQrX + 15, spotifyLabelY)));
+        }
+
+        // Separator line
+        var separatorY = topSectionHeight;
+        image.Mutate(ctx => { ctx.DrawLine(_noAaOptions, lightGray, 2, new PointF(Margin, separatorY), new PointF(DisplayWidth - Margin, separatorY)); });
+
+        // === BOTTOM: LOCATION ===
+        var bottomY = topSectionHeight + Margin;
+        var mapSize = 180;
+
+        if (locationData != null)
+        {
+            await DrawStaticMapAsync(image, locationData.Latitude, locationData.Longitude, Margin, bottomY, mapSize);
+            var infoX = Margin + mapSize + Margin;
+            var locHeaderY = bottomY;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "CURRENT LOCATION", smallBoldFont, darkGray, new PointF(infoX, locHeaderY)));
+            var locationText = !string.IsNullOrEmpty(locationData.HumanReadable)
+                ? locationData.HumanReadable
+                : (!string.IsNullOrEmpty(locationData.DisplayName) ? locationData.DisplayName : "Unknown Location");
+            locationText = TruncateText(locationText, 35);
+            var locTextY = bottomY + 22;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, locationText, largeFont, black, new PointF(infoX, locTextY)));
+            var cityCountry = BuildCityCountryString(locationData);
+            if (!string.IsNullOrEmpty(cityCountry))
+            {
+                var cityY = bottomY + 55;
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, cityCountry, font, darkGray, new PointF(infoX, cityY)));
+            }
+            var coordsText = $"GPS: {locationData.Latitude:F5}, {locationData.Longitude:F5}";
+            var coordsY = bottomY + 85;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, coordsText, smallFont, darkGray, new PointF(infoX, coordsY)));
+            var deviceStatusParts = new List<string>();
+            if (locationData.BatteryLevel.HasValue)
+            {
+                var batteryIcon = locationData.BatteryLevel.Value switch
+                {
+                    >= 80 => "[====]",
+                    >= 60 => "[=== ]",
+                    >= 40 => "[==  ]",
+                    >= 20 => "[=   ]",
+                    _ => "[!   ]"
+                };
+                var chargingIndicator = locationData.BatteryStatus switch
+                {
+                    2 => "+",
+                    3 => "*",
+                    _ => ""
+                };
+                deviceStatusParts.Add($"{batteryIcon}{chargingIndicator} {locationData.BatteryLevel}%");
+            }
+            if (locationData.Accuracy.HasValue)
+            {
+                deviceStatusParts.Add($"±{locationData.Accuracy}m");
+            }
+            if (locationData.Velocity.HasValue && locationData.Velocity.Value > 0)
+            {
+                deviceStatusParts.Add($"{locationData.Velocity} km/h");
+            }
+            if (!string.IsNullOrEmpty(locationData.Connection))
+            {
+                var connText = locationData.Connection switch
+                {
+                    "w" => "WiFi",
+                    "m" => "Mobile",
+                    "o" => "Offline",
+                    _ => locationData.Connection
+                };
+                deviceStatusParts.Add(connText);
+            }
+            if (deviceStatusParts.Count > 0)
+            {
+                var deviceStatusText = string.Join("  •  ", deviceStatusParts);
+                var deviceStatusY = bottomY + 105;
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, deviceStatusText, smallFont, darkGray, new PointF(infoX, deviceStatusY)));
+            }
+            if (locationData.MatchedKnownLocation != null)
+            {
+                var knownY = bottomY + 130;
+                var iconPrefix = GetLocationIcon(locationData.MatchedKnownLocation.Icon);
+                var knownText = $"{iconPrefix} {locationData.MatchedKnownLocation.DisplayText}";
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, knownText, font, black, new PointF(infoX, knownY)));
+                var badgeWidth = knownText.Length * 10 + 20;
+                image.Mutate(ctx =>
+                {
+                    ctx.DrawPolygon(_noAaOptions, darkGray, 1,
+                        new PointF(infoX - 5, knownY - 3),
+                        new PointF(infoX + badgeWidth, knownY - 3),
+                        new PointF(infoX + badgeWidth, knownY + 22),
+                        new PointF(infoX - 5, knownY + 22));
+                });
+            }
+            if (locationData.MatchedKnownLocation != null)
+            {
+                var distance = CalculateDistance(
+                    locationData.Latitude, locationData.Longitude,
+                    locationData.MatchedKnownLocation.Latitude, locationData.MatchedKnownLocation.Longitude);
+                var distanceText = distance < 1000 ? $"~{distance:F0}m from center" : $"~{distance/1000:F1}km from center";
+                var distY = bottomY + 160;
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, distanceText, tinyFont, darkGray, new PointF(infoX, distY)));
+            }
+            var lat = locationData.Latitude.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var lon = locationData.Longitude.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var mapsUrl = $"https://maps.google.com/?q={lat},{lon}";
+            var mapsQrX = DisplayWidth - SmallQrCodeSize - Margin;
+            var mapsQrY = bottomY + 10;
+            DrawQrCode(image, mapsUrl, mapsQrX, mapsQrY, SmallQrCodeSize);
+            var mapsLabelY = mapsQrY + SmallQrCodeSize + 5;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Open in Maps", tinyFont, darkGray, new PointF(mapsQrX + 5, mapsLabelY)));
+        }
+        else
+        {
+            var noLocY = bottomY + 50;
+            var noLocX = Margin + mapSize + Margin;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Location not available", largeFont, mediumGray, new PointF(noLocX, noLocY)));
+            image.Mutate(ctx =>
+            {
+                ctx.DrawPolygon(_noAaOptions, lightGray, 2,
+                    new PointF(Margin, bottomY),
+                    new PointF(Margin + mapSize, bottomY),
+                    new PointF(Margin + mapSize, bottomY + mapSize),
+                    new PointF(Margin, bottomY + mapSize));
+                ctx.DrawLine(_noAaOptions, lightGray, 1, new PointF(Margin, bottomY), new PointF(Margin + mapSize, bottomY + mapSize));
+                ctx.DrawLine(_noAaOptions, lightGray, 1, new PointF(Margin + mapSize, bottomY), new PointF(Margin, bottomY + mapSize));
+            });
+        }
+
+        // Footer
+        var footerY = DisplayHeight - Margin - 12;
+        var timestamp = DateTime.Now.ToString("MMM dd, yyyy  HH:mm");
+        image.Mutate(ctx => ctx.DrawText(_noAaOptions, $"Updated: {timestamp}", tinyFont, mediumGray, new PointF(Margin, footerY)));
+        image.Mutate(ctx => ctx.DrawText(_noAaOptions, "HomeLink", tinyFont, mediumGray, new PointF(DisplayWidth - 100, footerY)));
+
+        // Dither for 1-bit preview (matches e-ink look)
+        using var dithered = DitherImage(image);
+        using var ms = new MemoryStream();
+        await dithered.SaveAsPngAsync(ms);
+        return ms.ToArray();
+    }
 }
-
-

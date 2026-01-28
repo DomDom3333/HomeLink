@@ -5,6 +5,9 @@
 GET {{HomeLink_HostAddress}}/api/display/render
 Accept: application/json
 
+
+###
+GET {{HomeLink_HostAddress}}/api/display/image
 ###
 
 ### Render Spotify only (useful for testing spotify section)

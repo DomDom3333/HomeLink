@@ -63,10 +63,11 @@ public class DisplayController : ControllerBase
     }
 
     /// <summary>
-    /// Renders display with only Spotify data (for testing/fallback).
+    /// Renders the display image as a PNG file.
     /// </summary>
-    [HttpGet("render-spotify-only")]
-    public async Task<ActionResult<dynamic>> RenderSpotifyOnly()
+    /// <returns>PNG image file of the current display</returns>
+    [HttpGet("image")]
+    public async Task<IActionResult> RenderDisplayImage()
     {
         if (!_spotifyService.IsAuthorized)
         {
@@ -76,54 +77,9 @@ public class DisplayController : ControllerBase
         try
         {
             var spotifyData = await _spotifyService.GetCurrentlyPlayingAsync();
-            var bitmap = await _drawingService.DrawDisplayDataAsync(spotifyData, null);
-
-            return Ok(new
-            {
-                success = true,
-                bitmap = new
-                {
-                    width = bitmap.Width,
-                    height = bitmap.Height,
-                    bytesPerLine = bitmap.BytesPerLine,
-                    data = Convert.ToBase64String(bitmap.PackedData)
-                }
-            });
-        }
-        catch (Exception ex)
-        {
-            return BadRequest(new { error = ex.Message });
-        }
-    }
-
-    /// <summary>
-    /// Renders display with only location data (for testing/fallback).
-    /// Uses cached location from OwnTracks updates.
-    /// </summary>
-    [HttpGet("render-location-only")]
-    public async Task<ActionResult<dynamic>> RenderLocationOnly()
-    {
-        try
-        {
             var locationData = _locationService.GetCachedLocation();
-            if (locationData == null)
-            {
-                return NotFound(new { error = "No location cached. Send an OwnTracks location update first via POST /api/location/owntracks" });
-            }
-            
-            var bitmap = await _drawingService.DrawDisplayDataAsync(null, locationData);
-
-            return Ok(new
-            {
-                success = true,
-                bitmap = new
-                {
-                    width = bitmap.Width,
-                    height = bitmap.Height,
-                    bytesPerLine = bitmap.BytesPerLine,
-                    data = Convert.ToBase64String(bitmap.PackedData)
-                }
-            });
+            var pngBytes = await _drawingService.RenderDisplayPngAsync(spotifyData, locationData);
+            return File(pngBytes, "image/png");
         }
         catch (Exception ex)
         {
