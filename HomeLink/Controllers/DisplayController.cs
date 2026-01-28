@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using HomeLink.Models;
+using Microsoft.AspNetCore.Mvc;
 using HomeLink.Services;
 
 namespace HomeLink.Controllers;
@@ -36,13 +37,13 @@ public class DisplayController : ControllerBase
         try
         {
             // Get Spotify data
-            var spotifyData = await _spotifyService.GetCurrentlyPlayingAsync();
+            SpotifyTrackInfo? spotifyData = await _spotifyService.GetCurrentlyPlayingAsync();
 
             // Get cached location data from OwnTracks
-            var locationData = _locationService.GetCachedLocation();
+            LocationInfo? locationData = _locationService.GetCachedLocation();
 
             // Draw the display (async to support album art download)
-            var bitmap = await _drawingService.DrawDisplayDataAsync(spotifyData, locationData);
+            EInkBitmap bitmap = await _drawingService.DrawDisplayDataAsync(spotifyData, locationData);
 
             return Ok(new
             {
@@ -76,9 +77,9 @@ public class DisplayController : ControllerBase
 
         try
         {
-            var spotifyData = await _spotifyService.GetCurrentlyPlayingAsync();
-            var locationData = _locationService.GetCachedLocation();
-            var pngBytes = await _drawingService.RenderDisplayPngAsync(spotifyData, locationData);
+            SpotifyTrackInfo? spotifyData = await _spotifyService.GetCurrentlyPlayingAsync();
+            LocationInfo? locationData = _locationService.GetCachedLocation();
+            byte[] pngBytes = await _drawingService.RenderDisplayPngAsync(spotifyData, locationData);
             return File(pngBytes, "image/png");
         }
         catch (Exception ex)

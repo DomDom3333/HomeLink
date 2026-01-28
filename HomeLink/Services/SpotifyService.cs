@@ -1,19 +1,7 @@
-﻿using SpotifyAPI.Web;
+﻿using HomeLink.Models;
+using SpotifyAPI.Web;
 
 namespace HomeLink.Services;
-
-public class SpotifyTrackInfo
-{
-    public string Title { get; set; } = string.Empty;
-    public string Artist { get; set; } = string.Empty;
-    public string Album { get; set; } = string.Empty;
-    public string AlbumCoverUrl { get; set; } = string.Empty;
-    public long ProgressMs { get; set; }
-    public long DurationMs { get; set; }
-    public string SpotifyUri { get; set; } = string.Empty;
-    public string ScannableCodeUrl { get; set; } = string.Empty;
-    public bool IsPlaying { get; set; }
-}
 
 public class SpotifyService
 {
@@ -80,13 +68,13 @@ public class SpotifyService
         // Refresh token if expired or about to expire
         if (DateTime.UtcNow >= expiry || string.IsNullOrEmpty(accessToken))
         {
-            var config = SpotifyClientConfig.CreateDefault();
+            SpotifyClientConfig config = SpotifyClientConfig.CreateDefault();
 
             // Use AuthorizationCodeRefreshRequest which accepts clientId and clientSecret but they can be empty
             // When clientSecret is null/empty, some Spotify apps (PKCE/public client) only require client_id.
             // If Spotify requires client authentication and none is provided, the request will fail and we surface the error.
-            var refreshRequest = new AuthorizationCodeRefreshRequest(_clientId ?? string.Empty, _clientSecret ?? string.Empty, refreshToken);
-            var response = await new OAuthClient(config).RequestToken(refreshRequest);
+            AuthorizationCodeRefreshRequest refreshRequest = new AuthorizationCodeRefreshRequest(_clientId ?? string.Empty, _clientSecret ?? string.Empty, refreshToken);
+            AuthorizationCodeRefreshResponse response = await new OAuthClient(config).RequestToken(refreshRequest);
 
             lock (_tokenLock)
             {
@@ -114,11 +102,11 @@ public class SpotifyService
             // If we know it's playing, advance progress by the elapsed wall-clock time since last sync.
             if (_lastTrackInfo.IsPlaying)
             {
-                var now = DateTime.UtcNow;
-                var elapsedMs = (long)(now - _lastSyncUtc).TotalMilliseconds;
+                DateTime now = DateTime.UtcNow;
+                long elapsedMs = (long)(now - _lastSyncUtc).TotalMilliseconds;
                 if (elapsedMs > 0)
                 {
-                    var advancedProgress = _lastTrackInfo.ProgressMs + elapsedMs;
+                    long advancedProgress = _lastTrackInfo.ProgressMs + elapsedMs;
                     // Cap at duration
                     if (advancedProgress >= _lastTrackInfo.DurationMs)
                     {
@@ -167,7 +155,7 @@ public class SpotifyService
     public async Task<SpotifyTrackInfo?> GetCurrentlyPlayingAsync()
     {
         // First, if we have cached info and the song hasn't ended yet, return the locally advanced value
-        var cached = GetOptimisticallyAdvancedCachedTrack();
+        SpotifyTrackInfo? cached = GetOptimisticallyAdvancedCachedTrack();
         if (cached != null && cached.IsPlaying)
         {
             // We can safely return without polling if we're still within the track duration
@@ -177,8 +165,8 @@ public class SpotifyService
             }
         }
 
-        var client = await GetClientAsync();
-        var currentlyPlaying = await client.Player.GetCurrentlyPlaying(new PlayerCurrentlyPlayingRequest());
+        SpotifyClient client = await GetClientAsync();
+        CurrentlyPlaying? currentlyPlaying = await client.Player.GetCurrentlyPlaying(new PlayerCurrentlyPlayingRequest());
         
         lock (_cacheLock)
         {

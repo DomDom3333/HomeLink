@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using HomeLink.Services;
 using System.Text.Json.Serialization;
+using HomeLink.Models;
 
 namespace HomeLink.Controllers;
 
@@ -165,7 +166,7 @@ public class LocationController : ControllerBase
         try
         {
             // Create metadata from OwnTracks payload
-            var metadata = new OwnTracksMetadata
+            OwnTracksMetadata metadata = new()
             {
                 BatteryLevel = payload.Battery,
                 BatteryStatus = payload.BatteryStatus,
@@ -177,7 +178,7 @@ public class LocationController : ControllerBase
                 Timestamp = payload.Timestamp
             };
 
-            var location = await _locationService.UpdateCachedLocationAsync(
+            LocationInfo? location = await _locationService.UpdateCachedLocationAsync(
                 payload.Latitude.Value,
                 payload.Longitude.Value,
                 metadata);
