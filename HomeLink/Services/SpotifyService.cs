@@ -26,6 +26,8 @@ public class SpotifyService
     private string? _refreshToken;
     private DateTime _tokenExpiry = DateTime.MinValue;
     private SpotifyTrackInfo? _lastTrackInfo;
+    // Track when we last synchronized with Spotify and the device-reported progress at that time
+    private DateTime _lastSyncUtc = DateTime.MinValue;
 
     public SpotifyService(string? clientId, string? clientSecret, string? refreshToken = null, DateTime? expiry = null)
     {
@@ -101,8 +103,80 @@ public class SpotifyService
         return new SpotifyClient(SpotifyClientConfig.CreateDefault().WithToken(accessToken!));
     }
 
+    // Computes an optimistic, locally advanced progress for the cached track, if applicable.
+    private SpotifyTrackInfo? GetOptimisticallyAdvancedCachedTrack()
+    {
+        lock (_cacheLock)
+        {
+            if (_lastTrackInfo == null)
+                return null;
+
+            // If we know it's playing, advance progress by the elapsed wall-clock time since last sync.
+            if (_lastTrackInfo.IsPlaying)
+            {
+                var now = DateTime.UtcNow;
+                var elapsedMs = (long)(now - _lastSyncUtc).TotalMilliseconds;
+                if (elapsedMs > 0)
+                {
+                    var advancedProgress = _lastTrackInfo.ProgressMs + elapsedMs;
+                    // Cap at duration
+                    if (advancedProgress >= _lastTrackInfo.DurationMs)
+                    {
+                        // If we reached or passed the end, mark as not playing and cap progress
+                        _lastTrackInfo.ProgressMs = _lastTrackInfo.DurationMs;
+                        _lastTrackInfo.IsPlaying = false;
+                    }
+                    else
+                    {
+                        _lastTrackInfo.ProgressMs = advancedProgress;
+                    }
+                    // Move the last sync cursor forward so subsequent calls only add new elapsed time
+                    _lastSyncUtc = now;
+                }
+                // Return a shallow copy to avoid external mutation of our cache
+                return new SpotifyTrackInfo
+                {
+                    Title = _lastTrackInfo.Title,
+                    Artist = _lastTrackInfo.Artist,
+                    Album = _lastTrackInfo.Album,
+                    AlbumCoverUrl = _lastTrackInfo.AlbumCoverUrl,
+                    ProgressMs = _lastTrackInfo.ProgressMs,
+                    DurationMs = _lastTrackInfo.DurationMs,
+                    SpotifyUri = _lastTrackInfo.SpotifyUri,
+                    ScannableCodeUrl = _lastTrackInfo.ScannableCodeUrl,
+                    IsPlaying = _lastTrackInfo.IsPlaying
+                };
+            }
+
+            // If paused and we have cached info, just return it as-is.
+            return new SpotifyTrackInfo
+            {
+                Title = _lastTrackInfo.Title,
+                Artist = _lastTrackInfo.Artist,
+                Album = _lastTrackInfo.Album,
+                AlbumCoverUrl = _lastTrackInfo.AlbumCoverUrl,
+                ProgressMs = _lastTrackInfo.ProgressMs,
+                DurationMs = _lastTrackInfo.DurationMs,
+                SpotifyUri = _lastTrackInfo.SpotifyUri,
+                ScannableCodeUrl = _lastTrackInfo.ScannableCodeUrl,
+                IsPlaying = false
+            };
+        }
+    }
+
     public async Task<SpotifyTrackInfo?> GetCurrentlyPlayingAsync()
     {
+        // First, if we have cached info and the song hasn't ended yet, return the locally advanced value
+        var cached = GetOptimisticallyAdvancedCachedTrack();
+        if (cached != null && cached.IsPlaying)
+        {
+            // We can safely return without polling if we're still within the track duration
+            if (cached.ProgressMs < cached.DurationMs)
+            {
+                return cached;
+            }
+        }
+
         var client = await GetClientAsync();
         var currentlyPlaying = await client.Player.GetCurrentlyPlaying(new PlayerCurrentlyPlayingRequest());
         
@@ -122,6 +196,7 @@ public class SpotifyService
                     ScannableCodeUrl = $"https://scannables.scdn.co/uri/plain/jpeg/000000/white/640/spotify:track:{track.Id}",
                     IsPlaying = currentlyPlaying.IsPlaying
                 };
+                _lastSyncUtc = DateTime.UtcNow;
                 return _lastTrackInfo;
             }
 
