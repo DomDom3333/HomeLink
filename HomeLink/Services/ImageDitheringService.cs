@@ -374,20 +374,15 @@ public class ImageDitheringService
                 ReadOnlySpan<L8> row = accessor.GetRowSpan(y);
                 int rowOffset = y * bytesPerLine;
 
-                int x = 0;
+                // Reset x for each row - calculate from byte index
                 for (int bi = 0; bi < bytesPerLine; bi++)
                 {
+                    int x = bi * 4; // 4 pixels per byte
                     byte b = 0;
 
-                    for (int i = 0; i < 4; i++)
+                    for (int i = 0; i < 4 && x < width; i++, x++)
                     {
-                        int idx = 0;
-                        if (x < width)
-                        {
-                            idx = QuantizedIndexFromByte(row[x].PackedValue, levelsCount);
-                            x++;
-                        }
-
+                        int idx = QuantizedIndexFromByte(row[x].PackedValue, levelsCount);
                         int shift = 6 - (i * 2);
                         b |= (byte)((idx & 0x03) << shift);
                     }
@@ -408,13 +403,15 @@ public class ImageDitheringService
                 ReadOnlySpan<L8> row = accessor.GetRowSpan(y);
                 int rowOffset = y * bytesPerLine;
 
-                int x = 0;
                 for (int bi = 0; bi < bytesPerLine; bi++)
                 {
+                    int x = bi * 2; // 2 pixels per byte
                     int idx0 = 0, idx1 = 0;
 
-                    if (x < width) idx0 = QuantizedIndexFromByte(row[x++].PackedValue, levelsCount);
-                    if (x < width) idx1 = QuantizedIndexFromByte(row[x++].PackedValue, levelsCount);
+                    if (x < width)
+                        idx0 = QuantizedIndexFromByte(row[x].PackedValue, levelsCount);
+                    if (x + 1 < width)
+                        idx1 = QuantizedIndexFromByte(row[x + 1].PackedValue, levelsCount);
 
                     packedData[rowOffset + bi] = (byte)(((idx0 & 0x0F) << 4) | (idx1 & 0x0F));
                 }
