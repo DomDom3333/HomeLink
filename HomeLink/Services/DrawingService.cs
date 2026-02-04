@@ -93,9 +93,9 @@ public class DrawingService
         if (dither)
         {
             // Apply Floyd-Steinberg dithering for 1-bit conversion
-            using Image<L8> ditheredBitmap = _ditheringService.DitherImage(image);
+            using Image<L8> ditheredBitmap = _ditheringService.DitherImage(image, 2);
             // Convert to packed 1-bit format
-            return _ditheringService.ConvertToPacked1Bit(ditheredBitmap);
+            return _ditheringService.ConvertToPacked1Bit(ditheredBitmap, 2);
         }
         else
         {
@@ -124,7 +124,7 @@ public class DrawingService
         if (dither)
         {
             // Dither for 1-bit preview (matches e-ink look)
-            using Image<L8> dithered = _ditheringService.DitherImage(image);
+            using Image<L8> dithered = _ditheringService.DitherImage(image, 2);
             await dithered.SaveAsPngAsync(ms);
         }
         else
