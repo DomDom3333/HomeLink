@@ -20,15 +20,13 @@ public class DisplayController : ControllerBase
     }
 
     /// <summary>
-    /// Generates the complete display bitmap for the Lilygo T5 e-ink display.
-    /// Combines location and Spotify data into a formatted grayscale image,
-    /// applies Floyd-Steinberg dithering, and converts to 1-bit packed format.
-    /// Uses cached location from OwnTracks updates.
+    /// Binary endpoint for the ESP32: returns packed 1bpp bitmap bytes (no JSON, no base64).
     /// </summary>
-    /// <param name="dither">Whether to apply dithering (default true). Set to false for grayscale output.</param>
-    /// <returns>Binary bitmap data ready to send to e-ink display</returns>
+    /// <param name="dither">Whether to apply dithering (default true).</param>
+    /// <returns>application/octet-stream body = bitmap.PackedData</returns>
     [HttpGet("render")]
-    public async Task<ActionResult<dynamic>> RenderDisplay([FromQuery] bool dither = true)
+    [Produces("application/octet-stream")]
+    public async Task<IActionResult> RenderDisplay([FromQuery] bool dither = true)
     {
         if (!_spotifyService.IsAuthorized)
         {
@@ -37,13 +35,42 @@ public class DisplayController : ControllerBase
 
         try
         {
-            // Get Spotify data
             SpotifyTrackInfo? spotifyData = await _spotifyService.GetCurrentlyPlayingAsync();
-
-            // Get cached location data from OwnTracks
             LocationInfo? locationData = _locationService.GetCachedLocation();
 
-            // Draw the display (async to support album art download)
+            EInkBitmap bitmap = await _drawingService.DrawDisplayDataAsync(spotifyData, locationData, dither);
+
+            // Metadata in headers (ESP32 can read these if desired)
+            Response.Headers["X-Width"] = bitmap.Width.ToString();
+            Response.Headers["X-Height"] = bitmap.Height.ToString();
+            Response.Headers["X-BytesPerLine"] = bitmap.BytesPerLine.ToString();
+            Response.Headers["X-Dithered"] = dither ? "true" : "false";
+            Response.Headers["Cache-Control"] = "no-store, no-transform";
+
+            // Body is raw packed bytes (e.g. 64800 bytes for 960x540 @ 1bpp)
+            return File(bitmap.PackedData, "application/octet-stream");
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Optional: keep a JSON version for debugging in browser/Postman.
+    /// </summary>
+    [HttpGet("render-json")]
+    public async Task<ActionResult<dynamic>> RenderDisplayJson([FromQuery] bool dither = true)
+    {
+        if (!_spotifyService.IsAuthorized)
+        {
+            return Unauthorized(new { error = "Spotify is not authorized. Please visit /api/spotify/authorize first." });
+        }
+
+        try
+        {
+            SpotifyTrackInfo? spotifyData = await _spotifyService.GetCurrentlyPlayingAsync();
+            LocationInfo? locationData = _locationService.GetCachedLocation();
             EInkBitmap bitmap = await _drawingService.DrawDisplayDataAsync(spotifyData, locationData, dither);
 
             return Ok(new
@@ -64,7 +91,6 @@ public class DisplayController : ControllerBase
             return BadRequest(new { error = ex.Message });
         }
     }
-
     /// <summary>
     /// Renders the display image as a PNG file.
     /// </summary>
