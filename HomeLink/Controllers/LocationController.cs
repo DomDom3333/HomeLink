@@ -2,6 +2,7 @@
 using HomeLink.Services;
 using System.Text.Json.Serialization;
 using HomeLink.Models;
+using Microsoft.AspNetCore.Http;
 
 namespace HomeLink.Controllers;
 
@@ -147,6 +148,10 @@ public class LocationController : ControllerBase
     /// <param name="payload">The OwnTracks payload containing location data</param>
     /// <returns>OwnTracks-compatible response</returns>
     [HttpPost("owntracks")]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(object[]), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<object>> ReceiveOwnTracksUpdate([FromBody] OwnTracksPayload payload)
     {
         // OwnTracks sends different message types, we only care about location updates
@@ -160,7 +165,7 @@ public class LocationController : ControllerBase
         if (!payload.Latitude.HasValue || !payload.Longitude.HasValue)
         {
             _logger.LogWarning("Received OwnTracks location update without coordinates");
-            return BadRequest(new { error = "Missing latitude or longitude" });
+            return BadRequest(new ErrorResponse { Error = "Missing latitude or longitude" });
         }
 
         try
@@ -197,7 +202,7 @@ public class LocationController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing OwnTracks location update");
-            return StatusCode(500, new { error = "Failed to process location update" });
+            return StatusCode(500, new ErrorResponse { Error = "Failed to process location update" });
         }
     }
 }
