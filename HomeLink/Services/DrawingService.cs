@@ -73,6 +73,15 @@ public class DrawingService
         _iconDrawingService = new IconDrawingService(_noAaOptions);
     }
 
+    public DisplayMetadata GetDisplayMetadata()
+    {
+        return new DisplayMetadata
+        {
+            Width = DisplayWidth,
+            Height = DisplayHeight
+        };
+    }
+
     /// <summary>
     /// Creates an e-ink bitmap combining Spotify and location information
     /// Horizontal layout for Lilygo T5 e-ink display
