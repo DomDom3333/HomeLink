@@ -101,7 +101,7 @@ public class DisplayController : ControllerBase
     /// Returns the display data as structured JSON for client-side rendering.
     /// </summary>
     [HttpGet("data")]
-    public async Task<ActionResult<DisplayDataResponse>> GetDisplayData()
+    public async Task<IActionResult> GetDisplayData()
     {
         if (!_spotifyService.IsAuthorized)
         {
@@ -128,7 +128,7 @@ public class DisplayController : ControllerBase
     /// Returns the Spotify portion of the display data as JSON.
     /// </summary>
     [HttpGet("data/spotify")]
-    public async Task<ActionResult<SpotifyDisplayData>> GetSpotifyData()
+    public async Task<IActionResult> GetSpotifyData()
     {
         if (!_spotifyService.IsAuthorized)
         {
@@ -152,7 +152,7 @@ public class DisplayController : ControllerBase
     /// Returns the location portion of the display data as JSON.
     /// </summary>
     [HttpGet("data/location")]
-    public ActionResult<LocationDisplayData> GetLocationData()
+    public IActionResult GetLocationData()
     {
         try
         {
