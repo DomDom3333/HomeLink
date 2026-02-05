@@ -1,4 +1,7 @@
-﻿using HomeLink.Models;
+﻿using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using HomeLink.Models;
 using Microsoft.AspNetCore.Mvc;
 using HomeLink.Services;
 
@@ -9,12 +12,14 @@ namespace HomeLink.Controllers;
 public class DisplayController : ControllerBase
 {
     private readonly DrawingService _drawingService;
+    private readonly DisplayDataService _displayDataService;
     private readonly SpotifyService _spotifyService;
     private readonly LocationService _locationService;
 
-    public DisplayController(DrawingService drawingService, SpotifyService spotifyService, LocationService locationService)
+    public DisplayController(DrawingService drawingService, DisplayDataService displayDataService, SpotifyService spotifyService, LocationService locationService)
     {
         _drawingService = drawingService;
+        _displayDataService = displayDataService;
         _spotifyService = spotifyService;
         _locationService = locationService;
     }
@@ -90,6 +95,99 @@ public class DisplayController : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// Returns the display data as structured JSON for client-side rendering.
+    /// </summary>
+    [HttpGet("data")]
+    public async Task<ActionResult<DisplayDataResponse>> GetDisplayData()
+    {
+        if (!_spotifyService.IsAuthorized)
+        {
+            return Unauthorized(new { error = "Spotify is not authorized. Please visit /api/spotify/authorize first." });
+        }
+
+        try
+        {
+            SpotifyTrackInfo? spotifyData = await _spotifyService.GetCurrentlyPlayingAsync();
+            LocationInfo? locationData = _locationService.GetCachedLocation();
+            DisplayMetadata display = _drawingService.GetDisplayMetadata();
+
+            DisplayDataResponse response = _displayDataService.BuildDisplayData(spotifyData, locationData, display);
+
+            return WithEtag(response);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Returns the Spotify portion of the display data as JSON.
+    /// </summary>
+    [HttpGet("data/spotify")]
+    public async Task<ActionResult<SpotifyDisplayData>> GetSpotifyData()
+    {
+        if (!_spotifyService.IsAuthorized)
+        {
+            return Unauthorized(new { error = "Spotify is not authorized. Please visit /api/spotify/authorize first." });
+        }
+
+        try
+        {
+            SpotifyTrackInfo? spotifyData = await _spotifyService.GetCurrentlyPlayingAsync();
+            SpotifyDisplayData? response = _displayDataService.BuildSpotifyData(spotifyData);
+
+            return WithEtag(response);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Returns the location portion of the display data as JSON.
+    /// </summary>
+    [HttpGet("data/location")]
+    public ActionResult<LocationDisplayData> GetLocationData()
+    {
+        try
+        {
+            LocationInfo? locationData = _locationService.GetCachedLocation();
+            LocationDisplayData? response = _displayDataService.BuildLocationData(locationData);
+
+            return WithEtag(response);
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    private IActionResult WithEtag<T>(T payload)
+    {
+        string json = JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        string etag = ComputeEtag(json);
+
+        Response.Headers.ETag = etag;
+        Response.Headers.CacheControl = "no-cache";
+
+        if (Request.Headers.IfNoneMatch.Count > 0 && Request.Headers.IfNoneMatch.Contains(etag))
+        {
+            return StatusCode(StatusCodes.Status304NotModified);
+        }
+
+        return Content(json, "application/json", Encoding.UTF8);
+    }
+
+    private static string ComputeEtag(string content)
+    {
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(content));
+        string tag = Convert.ToHexString(hash);
+        return $"\"{tag}\"";
     }
     /// <summary>
     /// Renders the display image as a PNG file.

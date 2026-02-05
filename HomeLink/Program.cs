@@ -41,18 +41,18 @@ public static class Program
 
         builder.Services.AddHttpClient<Services.DrawingService>();
         builder.Services.AddScoped<Services.DrawingService>();
+        builder.Services.AddScoped<Services.DisplayDataService>();
         
         builder.Services.AddControllers();
+        builder.Services.AddHealthChecks();
         // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
         builder.Services.AddOpenApi();
 
         WebApplication app = builder.Build();
 
         // Configure the HTTP request pipeline.
-        if (app.Environment.IsDevelopment())
-        {
-            app.MapOpenApi();
-        }
+        app.MapOpenApi();
+        app.MapHealthChecks("/health");
 
 
         app.MapControllers();
