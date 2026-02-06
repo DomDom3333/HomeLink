@@ -170,7 +170,7 @@ public class SpotifyService
         
         lock (_cacheLock)
         {
-            if (currentlyPlaying?.Item is FullTrack track)
+            if (currentlyPlaying.Item is FullTrack track)
             {
                 _lastTrackInfo = new SpotifyTrackInfo
                 {

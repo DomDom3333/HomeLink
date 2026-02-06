@@ -2,7 +2,6 @@
 using HomeLink.Services;
 using System.Text.Json.Serialization;
 using HomeLink.Models;
-using Microsoft.AspNetCore.Http;
 
 namespace HomeLink.Controllers;
 

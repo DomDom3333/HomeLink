@@ -98,7 +98,7 @@ public class LocationService
         foreach (KnownLocation location in _knownLocations)
         {
             double distance = CalculateDistanceMeters(latitude, longitude, location.Latitude, location.Longitude);
-            if (!(distance <= location.RadiusMeters) || !(distance < closestDistance)) continue;
+            if ((distance > location.RadiusMeters) || (distance >= closestDistance)) continue;
             closestMatch = location;
             closestDistance = distance;
         }
