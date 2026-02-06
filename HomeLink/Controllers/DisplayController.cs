@@ -67,7 +67,14 @@ public class DisplayController : ControllerBase
             Response.Headers["X-BytesPerLine"] = bitmap.BytesPerLine.ToString();
             Response.Headers["X-Dithered"] = dither ? "true" : "false";
             Response.Headers.ETag = etag;
-            Response.Headers.CacheControl = "no-cache";
+            // Prevent intermediaries (CDNs/proxies) from caching or altering the binary response
+            Response.Headers["Cache-Control"] = "no-store, no-transform, private";
+            Response.Headers["Pragma"] = "no-cache";
+            // Diagnostic header - echo device battery when provided (helps confirm public URL received the query)
+            if (deviceBattery.HasValue)
+                Response.Headers["X-Device-Battery"] = deviceBattery.Value.ToString();
+            // Force download disposition so intermediaries treat this as opaque binary
+            Response.Headers["Content-Disposition"] = "attachment; filename=display.bin";
 
             // Body is raw packed bytes (e.g. 64800 bytes for 960x540 @ 1bpp)
             return File(bitmap.PackedData, "application/octet-stream");
@@ -210,7 +217,8 @@ public class DisplayController : ControllerBase
         string etag = ComputeEtag(json);
 
         Response.Headers.ETag = etag;
-        Response.Headers.CacheControl = "no-cache";
+        // Prevent intermediaries (CDNs/proxies) from altering the JSON/bitmap responses
+        Response.Headers["Cache-Control"] = "no-cache, no-transform";
 
         if (Request.Headers.IfNoneMatch.Count > 0 && Request.Headers.IfNoneMatch.Contains(etag))
         {
@@ -284,13 +292,14 @@ public class DisplayController : ControllerBase
     /// Renders the display image as a PNG file.
     /// </summary>
     /// <param name="dither">Whether to apply dithering (default true). Set to false for grayscale output.</param>
+    /// <param name="deviceBattery">Optional device battery percentage (0-100) to show the display battery indicator.</param>
     /// <returns>PNG image file of the current display</returns>
     [HttpGet("image")]
     [Produces("image/png")]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> RenderDisplayImage([FromQuery] bool dither = true)
+    public async Task<IActionResult> RenderDisplayImage([FromQuery] bool dither = true, [FromQuery] int? deviceBattery = null)
     {
         if (!_spotifyService.IsAuthorized)
         {
@@ -301,8 +310,16 @@ public class DisplayController : ControllerBase
         {
             SpotifyTrackInfo? spotifyData = await _spotifyService.GetCurrentlyPlayingAsync();
             LocationInfo? locationData = _locationService.GetCachedLocation();
-            byte[] pngBytes = await _drawingService.RenderDisplayPngAsync(spotifyData, locationData, dither);
-            return File(pngBytes, "image/png");
+            byte[] pngBytes = await _drawingService.RenderDisplayPngAsync(spotifyData, locationData, dither, deviceBattery);
+            // Prevent intermediaries from caching or transforming the PNG (important for exact pixel output)
+            Response.Headers["Cache-Control"] = "no-store, no-transform, private";
+            Response.Headers["Pragma"] = "no-cache";
+            // Diagnostic header - echo device battery when provided (helps confirm public URL received the query)
+            if (deviceBattery.HasValue)
+                Response.Headers["X-Device-Battery"] = deviceBattery.Value.ToString();
+            // Use attachment disposition to avoid image optimization by proxies/CDNs
+            Response.Headers["Content-Disposition"] = "attachment; filename=display.png";
+             return File(pngBytes, "image/png");
         }
         catch (Exception ex)
         {

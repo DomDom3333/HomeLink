@@ -11,6 +11,7 @@ GET {{HomeLink_HostAddress}}/api/display/image
 ###
 GET {{HomeLink_HostAddress}}/api/display/image?dither=false&deviceBattery=6
 ####
+GET https://homelink.essenhofer.at/api/display/image?dither=false&deviceBattery=2
 
 
 ### Render Spotify only (useful for testing spotify section)
