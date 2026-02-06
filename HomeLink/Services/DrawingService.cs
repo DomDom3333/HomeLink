@@ -367,8 +367,8 @@ public class DrawingService
                 
                 // Draw warning text (white on black)
                 Color white = Color.White;
-                string warningText = $"⚠ LOW BATTERY: {batteryLevel}%";
-                image.Mutate(ctx => ctx.DrawText(_noAaOptions, warningText, smallBoldFont, white, new PointF(warningX + 20, warningY + 7)));
+                string warningText = $"LOW BATTERY: {batteryLevel}%";
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, warningText, smallBoldFont, white, new PointF(warningX + 30, warningY + 7)));
             }
         }
 
