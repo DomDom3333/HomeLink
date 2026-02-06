@@ -18,7 +18,6 @@ public class DrawingService
     private const int Margin = 20;
     private const int AlbumArtSize = 250;
     private const int QrCodeSize = 120;
-    private const int SmallQrCodeSize = 100;
 
     private readonly HttpClient _httpClient;
     private readonly ILogger<DrawingService> _logger;
@@ -301,11 +300,11 @@ public class DrawingService
             string lat = locationData.Latitude.ToString(System.Globalization.CultureInfo.InvariantCulture);
             string lon = locationData.Longitude.ToString(System.Globalization.CultureInfo.InvariantCulture);
             string mapsUrl = $"https://maps.google.com/?q={lat},{lon}";
-            int mapsQrX = DisplayWidth - SmallQrCodeSize - Margin;
+            int mapsQrX = DisplayWidth - QrCodeSize - Margin;
             int mapsQrY = bottomY + 10;
 
-            _qrCodeService.DrawQrCode(image, mapsUrl, mapsQrX, mapsQrY, SmallQrCodeSize);
-            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Open in Maps", tinyFont, darkGray, new PointF(mapsQrX + 5, mapsQrY + SmallQrCodeSize + 5)));
+            _qrCodeService.DrawQrCode(image, mapsUrl, mapsQrX, mapsQrY, QrCodeSize);
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, "Open in Maps", tinyFont, darkGray, new PointF(mapsQrX + 5, mapsQrY + QrCodeSize + 5)));
         }
         else
         {
