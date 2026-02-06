@@ -29,6 +29,7 @@ public class DisplayController : ControllerBase
     /// Binary endpoint for the ESP32: returns packed 1bpp bitmap bytes (no JSON, no base64).
     /// </summary>
     /// <param name="dither">Whether to apply dithering (default true).</param>
+    /// <param name="deviceBattery">Optional device battery percentage (0-100). Shows warning if below 10%.</param>
     /// <returns>application/octet-stream body = bitmap.PackedData</returns>
     [HttpGet("render")]
     [Produces("application/octet-stream")]
@@ -36,7 +37,7 @@ public class DisplayController : ControllerBase
     [ProducesResponseType(StatusCodes.Status304NotModified)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> RenderDisplay([FromQuery] bool dither = true)
+    public async Task<IActionResult> RenderDisplay([FromQuery] bool dither = true, [FromQuery] int? deviceBattery = null)
     {
         if (!_spotifyService.IsAuthorized)
         {
@@ -49,7 +50,7 @@ public class DisplayController : ControllerBase
             LocationInfo? locationData = _locationService.GetCachedLocation();
 
             // Compute ETag from stable source data (excluding volatile timestamps)
-            string etag = ComputeSourceDataEtag(spotifyData, locationData, dither);
+            string etag = ComputeSourceDataEtag(spotifyData, locationData, dither, deviceBattery);
 
             // Check If-None-Match header before rendering
             if (Request.Headers.IfNoneMatch.Count > 0 && Request.Headers.IfNoneMatch.Contains(etag))
@@ -58,7 +59,7 @@ public class DisplayController : ControllerBase
             }
 
             // Render bitmap only if needed
-            EInkBitmap bitmap = await _drawingService.DrawDisplayDataAsync(spotifyData, locationData, dither);
+            EInkBitmap bitmap = await _drawingService.DrawDisplayDataAsync(spotifyData, locationData, dither, deviceBattery);
 
             // Metadata in headers (ESP32 can read these if desired)
             Response.Headers["X-Width"] = bitmap.Width.ToString();
@@ -226,12 +227,20 @@ public class DisplayController : ControllerBase
         return $"\"{tag}\"";
     }
 
-    private static string ComputeSourceDataEtag(SpotifyTrackInfo? spotify, LocationInfo? location, bool dither)
+    private static string ComputeSourceDataEtag(SpotifyTrackInfo? spotify, LocationInfo? location, bool dither, int? deviceBattery = null)
     {
         var sb = new StringBuilder();
         
         // Include dither setting
         sb.Append($"dither:{dither}|");
+        
+        // Include device battery (for low battery warning state changes)
+        if (deviceBattery.HasValue)
+        {
+            // Only include threshold-relevant state (above or below 10%)
+            sb.Append($"deviceBatteryLow:{(deviceBattery.Value < 10)}|");
+            sb.Append($"deviceBattery:{deviceBattery.Value % 10 == 0}|");
+        }
         
         // Include stable Spotify fields (exclude ProgressMs as it changes constantly)
         if (spotify != null)

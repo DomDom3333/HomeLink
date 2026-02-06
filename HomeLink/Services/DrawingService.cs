@@ -88,12 +88,13 @@ public class DrawingService
     /// <param name="spotifyData">Spotify track information</param>
     /// <param name="locationData">Location information</param>
     /// <param name="dither">Whether to apply dithering (default true)</param>
-    public async Task<EInkBitmap> DrawDisplayDataAsync(SpotifyTrackInfo? spotifyData, LocationInfo? locationData, bool dither = true)
+    /// <param name="deviceBattery">Optional device battery percentage (0-100)</param>
+    public async Task<EInkBitmap> DrawDisplayDataAsync(SpotifyTrackInfo? spotifyData, LocationInfo? locationData, bool dither = true, int? deviceBattery = null)
     {
         // Create a grayscale image at display resolution (horizontal)
         using Image<L8> image = new Image<L8>(DisplayWidth, DisplayHeight, new L8(255)); // White background
 
-        DrawContent(image, spotifyData, locationData);
+        DrawContent(image, spotifyData, locationData, deviceBattery);
         
         // Draw dynamic content (album art, map)
         await DrawDynamicContentAsync(image, spotifyData, locationData);
@@ -119,12 +120,13 @@ public class DrawingService
     /// <param name="spotifyData">Spotify track information</param>
     /// <param name="locationData">Location information</param>
     /// <param name="dither">Whether to apply dithering (default true)</param>
-    public async Task<byte[]> RenderDisplayPngAsync(SpotifyTrackInfo? spotifyData, LocationInfo? locationData, bool dither = true)
+    /// <param name="deviceBattery">Optional device battery percentage (0-100)</param>
+    public async Task<byte[]> RenderDisplayPngAsync(SpotifyTrackInfo? spotifyData, LocationInfo? locationData, bool dither = true, int? deviceBattery = null)
     {
         // Create a grayscale image at display resolution (horizontal)
         using Image<L8> image = new Image<L8>(DisplayWidth, DisplayHeight, new L8(255)); // White background
 
-        DrawContent(image, spotifyData, locationData);
+        DrawContent(image, spotifyData, locationData, deviceBattery);
         await DrawDynamicContentAsync(image, spotifyData, locationData);
 
         using MemoryStream ms = new MemoryStream();
@@ -147,7 +149,7 @@ public class DrawingService
     /// <summary>
     /// Draws all static content (text, icons, QR codes, etc.)
     /// </summary>
-    private void DrawContent(Image<L8> image, SpotifyTrackInfo? spotifyData, LocationInfo? locationData)
+    private void DrawContent(Image<L8> image, SpotifyTrackInfo? spotifyData, LocationInfo? locationData, int? deviceBattery = null)
     {
         Font font = _fontFamily.CreateFont(20);
         Font titleFont = _fontFamily.CreateFont(32, FontStyle.Bold);
@@ -332,6 +334,44 @@ public class DrawingService
         int footerY = DisplayHeight - Margin - 12;
         string timestamp = DateTime.Now.ToString("MMM dd, yyyy  HH:mm");
         image.Mutate(ctx => ctx.DrawText(_noAaOptions, $"Updated: {timestamp}", tinyFont, mediumGray, new PointF(Margin, footerY)));
+
+        // Device battery indicator in footer (center-right area)
+        if (deviceBattery.HasValue)
+        {
+            int batteryX = DisplayWidth / 2 + 50;
+            int batteryWidth = 28;
+            int batteryHeight = 12;
+            int batteryLevel = Math.Clamp(deviceBattery.Value, 0, 100);
+            
+            _iconDrawingService.DrawBatteryIcon(image, batteryX, footerY, batteryWidth, batteryHeight, batteryLevel, null, mediumGray, mediumGray);
+            string batteryText = $"Display: {batteryLevel}%";
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, batteryText, tinyFont, mediumGray, new PointF(batteryX + batteryWidth + 6, footerY)));
+            
+            // Low battery warning when below 10%
+            if (batteryLevel < 10)
+            {
+                int warningY = Margin;
+                int warningX = DisplayWidth / 2 - 100;
+                int warningWidth = 200;
+                int warningHeight = 30;
+                
+                // Draw warning banner background
+                image.Mutate(ctx =>
+                {
+                    ctx.FillPolygon(_noAaOptions, black,
+                        new PointF(warningX, warningY),
+                        new PointF(warningX + warningWidth, warningY),
+                        new PointF(warningX + warningWidth, warningY + warningHeight),
+                        new PointF(warningX, warningY + warningHeight));
+                });
+                
+                // Draw warning text (white on black)
+                Color white = Color.White;
+                string warningText = $"⚠ LOW BATTERY: {batteryLevel}%";
+                image.Mutate(ctx => ctx.DrawText(_noAaOptions, warningText, smallBoldFont, white, new PointF(warningX + 20, warningY + 7)));
+            }
+        }
+
         image.Mutate(ctx => ctx.DrawText(_noAaOptions, "HomeLink", tinyFont, mediumGray, new PointF(DisplayWidth - 100, footerY)));
     }
 
