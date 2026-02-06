@@ -48,17 +48,17 @@ public class DisplayController : ControllerBase
             SpotifyTrackInfo? spotifyData = await _spotifyService.GetCurrentlyPlayingAsync();
             LocationInfo? locationData = _locationService.GetCachedLocation();
 
-            EInkBitmap bitmap = await _drawingService.DrawDisplayDataAsync(spotifyData, locationData, dither);
+            // Compute ETag from stable source data (excluding volatile timestamps)
+            string etag = ComputeSourceDataEtag(spotifyData, locationData, dither);
 
-            // Compute ETag from bitmap data
-            byte[] hash = SHA256.HashData(bitmap.PackedData);
-            string etag = $"\"{Convert.ToHexString(hash)}\"";
-
-            // Check If-None-Match header
+            // Check If-None-Match header before rendering
             if (Request.Headers.IfNoneMatch.Count > 0 && Request.Headers.IfNoneMatch.Contains(etag))
             {
                 return StatusCode(StatusCodes.Status304NotModified);
             }
+
+            // Render bitmap only if needed
+            EInkBitmap bitmap = await _drawingService.DrawDisplayDataAsync(spotifyData, locationData, dither);
 
             // Metadata in headers (ESP32 can read these if desired)
             Response.Headers["X-Width"] = bitmap.Width.ToString();
@@ -221,6 +221,52 @@ public class DisplayController : ControllerBase
 
     private static string ComputeEtag(string content)
     {
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(content));
+        string tag = Convert.ToHexString(hash);
+        return $"\"{tag}\"";
+    }
+
+    private static string ComputeSourceDataEtag(SpotifyTrackInfo? spotify, LocationInfo? location, bool dither)
+    {
+        var sb = new StringBuilder();
+        
+        // Include dither setting
+        sb.Append($"dither:{dither}|");
+        
+        // Include stable Spotify fields (exclude ProgressMs as it changes constantly)
+        if (spotify != null)
+        {
+            sb.Append($"spotify:");
+            sb.Append($"title:{spotify.Title}|");
+            sb.Append($"artist:{spotify.Artist}|");
+            sb.Append($"album:{spotify.Album}|");
+            sb.Append($"coverUrl:{spotify.AlbumCoverUrl}|");
+            sb.Append($"duration:{spotify.DurationMs}|");
+            sb.Append($"uri:{spotify.SpotifyUri}|");
+            sb.Append($"playing:{spotify.IsPlaying}|");
+            sb.Append($"progressMs:{spotify.ProgressMs}|");
+        }
+        
+        // Include stable Location fields (exclude timestamps, battery, velocity, etc.)
+        if (location != null)
+        {
+            sb.Append($"location:");
+            // Round coordinates to ~11m precision (5 decimal places) to avoid minor GPS drift
+            sb.Append($"lat:{Math.Round(location.Latitude, 5)}|");
+            sb.Append($"lon:{Math.Round(location.Longitude, 5)}|");
+            sb.Append($"name:{location.DisplayName}|");
+            sb.Append($"hr:{location.HumanReadable}|");
+            sb.Append($"district:{location.District}|");
+            sb.Append($"city:{location.City}|");
+            sb.Append($"town:{location.Town}|");
+            sb.Append($"village:{location.Village}|");
+            sb.Append($"country:{location.Country}|");
+            sb.Append($"knownLoc:{location.MatchedKnownLocation?.Name}|");
+            // Exclude: BatteryLevel, BatteryStatus, Accuracy, Altitude, Velocity, Timestamp
+            // (these change frequently but don't affect the display meaningfully)
+        }
+        
+        string content = sb.ToString();
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(content));
         string tag = Convert.ToHexString(hash);
         return $"\"{tag}\"";
