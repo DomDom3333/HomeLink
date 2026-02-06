@@ -33,6 +33,7 @@ public class DisplayController : ControllerBase
     [HttpGet("render")]
     [Produces("application/octet-stream")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status304NotModified)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> RenderDisplay([FromQuery] bool dither = true)
@@ -49,12 +50,23 @@ public class DisplayController : ControllerBase
 
             EInkBitmap bitmap = await _drawingService.DrawDisplayDataAsync(spotifyData, locationData, dither);
 
+            // Compute ETag from bitmap data
+            byte[] hash = SHA256.HashData(bitmap.PackedData);
+            string etag = $"\"{Convert.ToHexString(hash)}\"";
+
+            // Check If-None-Match header
+            if (Request.Headers.IfNoneMatch.Count > 0 && Request.Headers.IfNoneMatch.Contains(etag))
+            {
+                return StatusCode(StatusCodes.Status304NotModified);
+            }
+
             // Metadata in headers (ESP32 can read these if desired)
             Response.Headers["X-Width"] = bitmap.Width.ToString();
             Response.Headers["X-Height"] = bitmap.Height.ToString();
             Response.Headers["X-BytesPerLine"] = bitmap.BytesPerLine.ToString();
             Response.Headers["X-Dithered"] = dither ? "true" : "false";
-            Response.Headers["Cache-Control"] = "no-store, no-transform";
+            Response.Headers.ETag = etag;
+            Response.Headers.CacheControl = "no-cache";
 
             // Body is raw packed bytes (e.g. 64800 bytes for 960x540 @ 1bpp)
             return File(bitmap.PackedData, "application/octet-stream");
