@@ -175,7 +175,7 @@ public class DisplayController : ControllerBase
             if (deviceBattery.HasValue)
                 Response.Headers["X-Device-Battery"] = deviceBattery.Value.ToString();
             // Use attachment disposition to avoid image optimization by proxies/CDNs
-            Response.Headers["Content-Disposition"] = "attachment; filename=display.png";
+            //Response.Headers["Content-Disposition"] = "attachment; filename=display.png";
             _logger.LogInformation("RenderDisplayImage returning PNG. Bytes: {ByteCount}", pngBytes.Length);
              return File(pngBytes, "image/png");
         }
