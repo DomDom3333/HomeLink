@@ -1,6 +1,7 @@
 namespace HomeLink;
 
 using System.Globalization;
+using Microsoft.AspNetCore.HttpLogging;
 
 public static class Program
 {
@@ -29,8 +30,9 @@ public static class Program
             }
         }
 
-        builder.Services.AddSingleton<Services.SpotifyService>(_ => 
+        builder.Services.AddSingleton<Services.SpotifyService>(sp => 
             new Services.SpotifyService(
+                sp.GetRequiredService<ILogger<Services.SpotifyService>>(),
                 spotifyClientId,
                 spotifyClientSecret,
                 spotifyRefreshToken,
@@ -48,12 +50,30 @@ public static class Program
         // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
         builder.Services.AddOpenApi();
 
+        builder.Services.AddHttpLogging(options =>
+        {
+            options.LoggingFields = HttpLoggingFields.RequestMethod
+                | HttpLoggingFields.RequestPath
+                | HttpLoggingFields.RequestQuery
+                | HttpLoggingFields.RequestHeaders
+                | HttpLoggingFields.ResponseStatusCode
+                | HttpLoggingFields.ResponseHeaders
+                | HttpLoggingFields.Duration;
+            options.RequestHeaders.Add("User-Agent");
+            options.RequestHeaders.Add("If-None-Match");
+            options.ResponseHeaders.Add("ETag");
+            options.ResponseHeaders.Add("X-Device-Battery");
+            options.CombineLogs = true;
+        });
+
         WebApplication app = builder.Build();
 
         // Configure the HTTP request pipeline.
         app.MapOpenApi();
         app.MapHealthChecks("/health");
 
+
+        app.UseHttpLogging();
 
         app.MapControllers();
 
