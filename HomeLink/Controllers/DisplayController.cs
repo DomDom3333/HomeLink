@@ -13,12 +13,14 @@ public class DisplayController : ControllerBase
     private readonly DrawingService _drawingService;
     private readonly SpotifyService _spotifyService;
     private readonly LocationService _locationService;
+    private readonly ILogger<DisplayController> _logger;
 
-    public DisplayController(DrawingService drawingService, SpotifyService spotifyService, LocationService locationService)
+    public DisplayController(DrawingService drawingService, SpotifyService spotifyService, LocationService locationService, ILogger<DisplayController> logger)
     {
         _drawingService = drawingService;
         _spotifyService = spotifyService;
         _locationService = locationService;
+        _logger = logger;
     }
 
     /// <summary>
@@ -35,8 +37,11 @@ public class DisplayController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> RenderDisplay([FromQuery] bool dither = true, [FromQuery] int? deviceBattery = null)
     {
+        _logger.LogInformation("RenderDisplay request received. Dither: {Dither}, DeviceBattery: {DeviceBattery}", dither, deviceBattery);
+
         if (!_spotifyService.IsAuthorized)
         {
+            _logger.LogWarning("RenderDisplay denied: Spotify is not authorized.");
             return Unauthorized(new ErrorResponse { Error = "Spotify is not authorized. Please visit /api/spotify/authorize first." });
         }
 
@@ -51,6 +56,7 @@ public class DisplayController : ControllerBase
             // Check If-None-Match header before rendering
             if (Request.Headers.IfNoneMatch.Count > 0 && Request.Headers.IfNoneMatch.Contains(etag))
             {
+                _logger.LogInformation("RenderDisplay returning 304 Not Modified. ETag: {Etag}", etag);
                 return StatusCode(StatusCodes.Status304NotModified);
             }
 
@@ -73,10 +79,12 @@ public class DisplayController : ControllerBase
             Response.Headers["Content-Disposition"] = "attachment; filename=display.bin";
 
             // Body is raw packed bytes (e.g. 64800 bytes for 960x540 @ 1bpp)
+            _logger.LogInformation("RenderDisplay returning bitmap bytes. Width: {Width}, Height: {Height}, Bytes: {ByteCount}", bitmap.Width, bitmap.Height, bitmap.PackedData.Length);
             return File(bitmap.PackedData, "application/octet-stream");
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "RenderDisplay failed.");
             return BadRequest(new ErrorResponse { Error = ex.Message });
         }
     }
@@ -147,8 +155,11 @@ public class DisplayController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> RenderDisplayImage([FromQuery] bool dither = true, [FromQuery] int? deviceBattery = null)
     {
+        _logger.LogInformation("RenderDisplayImage request received. Dither: {Dither}, DeviceBattery: {DeviceBattery}", dither, deviceBattery);
+
         if (!_spotifyService.IsAuthorized)
         {
+            _logger.LogWarning("RenderDisplayImage denied: Spotify is not authorized.");
             return Unauthorized(new ErrorResponse { Error = "Spotify is not authorized. Please visit /api/spotify/authorize first." });
         }
 
@@ -165,10 +176,12 @@ public class DisplayController : ControllerBase
                 Response.Headers["X-Device-Battery"] = deviceBattery.Value.ToString();
             // Use attachment disposition to avoid image optimization by proxies/CDNs
             Response.Headers["Content-Disposition"] = "attachment; filename=display.png";
+            _logger.LogInformation("RenderDisplayImage returning PNG. Bytes: {ByteCount}", pngBytes.Length);
              return File(pngBytes, "image/png");
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "RenderDisplayImage failed.");
             return BadRequest(new ErrorResponse { Error = ex.Message });
         }
     }
@@ -183,8 +196,11 @@ public class DisplayController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
     public async Task<ActionResult<RenderBitmapResponse>> RenderSpotifyOnly()
     {
+        _logger.LogInformation("RenderSpotifyOnly request received.");
+
         if (!_spotifyService.IsAuthorized)
         {
+            _logger.LogWarning("RenderSpotifyOnly denied: Spotify is not authorized.");
             return Unauthorized(new ErrorResponse { Error = "Spotify is not authorized. Please visit /api/spotify/authorize first." });
         }
 
@@ -205,10 +221,12 @@ public class DisplayController : ControllerBase
                 }
             };
 
+            _logger.LogInformation("RenderSpotifyOnly returning bitmap payload.");
             return Ok(response);
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "RenderSpotifyOnly failed.");
             return BadRequest(new ErrorResponse { Error = ex.Message });
         }
     }
@@ -224,11 +242,14 @@ public class DisplayController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status404NotFound)]
     public async Task<ActionResult<RenderBitmapResponse>> RenderLocationOnly()
     {
+        _logger.LogInformation("RenderLocationOnly request received.");
+
         try
         {
             var locationData = _locationService.GetCachedLocation();
             if (locationData == null)
             {
+                _logger.LogWarning("RenderLocationOnly requested but no cached location is available.");
                 return NotFound(new ErrorResponse { Error = "No location cached. Send an OwnTracks location update first via POST /api/location/owntracks" });
             }
             
@@ -246,10 +267,12 @@ public class DisplayController : ControllerBase
                 }
             };
 
+            _logger.LogInformation("RenderLocationOnly returning bitmap payload.");
             return Ok(response);
         }
         catch (Exception ex)
         {
+            _logger.LogError(ex, "RenderLocationOnly failed.");
             return BadRequest(new ErrorResponse { Error = ex.Message });
         }
     }

@@ -1,14 +1,17 @@
 ﻿using HomeLink.Models;
+using Microsoft.Extensions.Logging;
 using SpotifyAPI.Web;
 
 namespace HomeLink.Services;
 
 public class SpotifyService
 {
+    private readonly ILogger<SpotifyService> _logger;
     private readonly string? _clientId;
     private readonly string? _clientSecret;
     private readonly object _tokenLock = new();
     private readonly object _cacheLock = new();
+    private readonly SemaphoreSlim _refreshSemaphore = new(1, 1);
     
     private string? _accessToken;
     private string? _refreshToken;
@@ -17,8 +20,9 @@ public class SpotifyService
     // Track when we last synchronized with Spotify and the device-reported progress at that time
     private DateTime _lastSyncUtc = DateTime.MinValue;
 
-    public SpotifyService(string? clientId, string? clientSecret, string? refreshToken = null, DateTime? expiry = null)
+    public SpotifyService(ILogger<SpotifyService> logger, string? clientId, string? clientSecret, string? refreshToken = null, DateTime? expiry = null)
     {
+        _logger = logger;
         _clientId = string.IsNullOrWhiteSpace(clientId) ? null : clientId;
         _clientSecret = string.IsNullOrWhiteSpace(clientSecret) ? null : clientSecret;
 
@@ -49,6 +53,12 @@ public class SpotifyService
 
     private async Task<SpotifyClient> GetClientAsync()
     {
+        string? accessToken = await EnsureAccessTokenAsync(forceRefresh: false);
+        return new SpotifyClient(SpotifyClientConfig.CreateDefault().WithToken(accessToken));
+    }
+
+    private async Task<string> EnsureAccessTokenAsync(bool forceRefresh)
+    {
         string? accessToken;
         string? refreshToken;
         DateTime expiry;
@@ -62,33 +72,57 @@ public class SpotifyService
 
         if (string.IsNullOrEmpty(refreshToken))
         {
+            _logger.LogWarning("Spotify token refresh requested but no refresh token is configured.");
             throw new InvalidOperationException("Spotify is not authorized. Please provide SPOTIFY_REFRESH_TOKEN in environment variables or complete the OAuth flow first.");
         }
 
-        // Refresh token if expired or about to expire
-        if (DateTime.UtcNow >= expiry || string.IsNullOrEmpty(accessToken))
+        if (!forceRefresh && !string.IsNullOrEmpty(accessToken) && DateTime.UtcNow < expiry)
         {
-            SpotifyClientConfig config = SpotifyClientConfig.CreateDefault();
+            return accessToken;
+        }
 
-            // Use AuthorizationCodeRefreshRequest which accepts clientId and clientSecret but they can be empty
-            // When clientSecret is null/empty, some Spotify apps (PKCE/public client) only require client_id.
-            // If Spotify requires client authentication and none is provided, the request will fail and we surface the error.
-            AuthorizationCodeRefreshRequest refreshRequest = new AuthorizationCodeRefreshRequest(_clientId ?? string.Empty, _clientSecret ?? string.Empty, refreshToken);
+        await _refreshSemaphore.WaitAsync();
+        try
+        {
+            // Another request may have refreshed while we were waiting.
+            lock (_tokenLock)
+            {
+                accessToken = _accessToken;
+                refreshToken = _refreshToken;
+                expiry = _tokenExpiry;
+            }
+
+            if (!forceRefresh && !string.IsNullOrEmpty(accessToken) && DateTime.UtcNow < expiry)
+            {
+                return accessToken;
+            }
+
+            _logger.LogInformation("Refreshing Spotify access token (forceRefresh: {ForceRefresh}).", forceRefresh);
+
+            SpotifyClientConfig config = SpotifyClientConfig.CreateDefault();
+            AuthorizationCodeRefreshRequest refreshRequest = new AuthorizationCodeRefreshRequest(_clientId ?? string.Empty, _clientSecret ?? string.Empty, refreshToken!);
             AuthorizationCodeRefreshResponse response = await new OAuthClient(config).RequestToken(refreshRequest);
 
             lock (_tokenLock)
             {
                 _accessToken = response.AccessToken;
-                // Spotify may or may not return a new refresh token. Preserve the existing one if not returned.
                 if (!string.IsNullOrEmpty(response.RefreshToken))
                     _refreshToken = response.RefreshToken;
 
                 _tokenExpiry = DateTime.UtcNow.AddSeconds(response.ExpiresIn - 60);
-                accessToken = _accessToken;
+                _logger.LogInformation("Spotify access token refreshed successfully. Expires at {ExpiryUtc}.", _tokenExpiry);
+                return _accessToken!;
             }
         }
-
-        return new SpotifyClient(SpotifyClientConfig.CreateDefault().WithToken(accessToken!));
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to refresh Spotify access token.");
+            throw;
+        }
+        finally
+        {
+            _refreshSemaphore.Release();
+        }
     }
 
     // Computes an optimistic, locally advanced progress for the cached track, if applicable.
@@ -166,11 +200,32 @@ public class SpotifyService
         }
 
         SpotifyClient client = await GetClientAsync();
-        CurrentlyPlaying? currentlyPlaying = await client.Player.GetCurrentlyPlaying(new PlayerCurrentlyPlayingRequest());
+        CurrentlyPlaying? currentlyPlaying;
+        try
+        {
+            _logger.LogInformation("Calling Spotify currently-playing endpoint.");
+            currentlyPlaying = await client.Player.GetCurrentlyPlaying(new PlayerCurrentlyPlayingRequest());
+            _logger.LogInformation("Spotify currently-playing response received. HasItem: {HasItem}, IsPlaying: {IsPlaying}.", currentlyPlaying?.Item != null, currentlyPlaying?.IsPlaying);
+        }
+        catch (APIUnauthorizedException)
+        {
+            // Access tokens can be invalidated before local expiry. Force a refresh and retry once.
+            _logger.LogWarning("Spotify currently-playing call returned 401 Unauthorized. Forcing token refresh and retrying once.");
+            string accessToken = await EnsureAccessTokenAsync(forceRefresh: true);
+            SpotifyClient refreshedClient = new SpotifyClient(SpotifyClientConfig.CreateDefault().WithToken(accessToken));
+            _logger.LogInformation("Retrying Spotify currently-playing endpoint after forced token refresh.");
+            currentlyPlaying = await refreshedClient.Player.GetCurrentlyPlaying(new PlayerCurrentlyPlayingRequest());
+            _logger.LogInformation("Spotify currently-playing retry response received. HasItem: {HasItem}, IsPlaying: {IsPlaying}.", currentlyPlaying?.Item != null, currentlyPlaying?.IsPlaying);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Spotify currently-playing request failed.");
+            throw;
+        }
         
         lock (_cacheLock)
         {
-            if (currentlyPlaying.Item is FullTrack track)
+            if (currentlyPlaying?.Item is FullTrack track)
             {
                 _lastTrackInfo = new SpotifyTrackInfo
                 {
@@ -186,6 +241,11 @@ public class SpotifyService
                 };
                 _lastSyncUtc = DateTime.UtcNow;
                 return _lastTrackInfo;
+            }
+
+            if (currentlyPlaying == null)
+            {
+                _logger.LogWarning("Spotify currently-playing response was empty.");
             }
 
             if (_lastTrackInfo != null)

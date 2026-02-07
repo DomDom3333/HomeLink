@@ -153,11 +153,14 @@ public class LocationController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<object>> ReceiveOwnTracksUpdate([FromBody] OwnTracksPayload payload)
     {
+        _logger.LogInformation("ReceiveOwnTracksUpdate request received. Type: {Type}, TrackerId: {TrackerId}", payload.Type, payload.TrackerId);
+
         // OwnTracks sends different message types, we only care about location updates
         if (payload.Type != "location")
         {
             _logger.LogDebug("Received non-location OwnTracks message of type: {Type}", payload.Type);
             // Return empty array as per OwnTracks protocol for non-location messages
+            _logger.LogInformation("ReceiveOwnTracksUpdate returning empty response for non-location payload.");
             return Ok(Array.Empty<object>());
         }
 
@@ -196,6 +199,7 @@ public class LocationController : ControllerBase
 
             // OwnTracks expects an array response (can contain commands to send back)
             // Empty array means no commands
+            _logger.LogInformation("ReceiveOwnTracksUpdate processed successfully. Returning empty command array.");
             return Ok(Array.Empty<object>());
         }
         catch (Exception ex)
