@@ -133,44 +133,57 @@ public class SpotifyService
             if (_lastTrackInfo == null)
                 return null;
 
-            // If we know it's playing, advance progress by the elapsed wall-clock time since last sync.
+            // If we know it's playing, compute an optimistic progress without mutating the cache.
             if (_lastTrackInfo.IsPlaying)
             {
                 DateTime now = DateTime.UtcNow;
-                long elapsedMs = (long)(now - _lastSyncUtc).TotalMilliseconds;
+
+                // If _lastSyncUtc is uninitialized, don't advance optimistically to avoid huge jumps.
+                long elapsedMs = _lastSyncUtc == DateTime.MinValue ? 0L : (long)(now - _lastSyncUtc).TotalMilliseconds;
+
+                long progressToReturn = _lastTrackInfo.ProgressMs;
+
                 if (elapsedMs > 0)
                 {
                     long advancedProgress = _lastTrackInfo.ProgressMs + elapsedMs;
                     // Cap at duration
                     if (advancedProgress >= _lastTrackInfo.DurationMs)
                     {
-                        // If we reached or passed the end, mark as not playing and cap progress
-                        _lastTrackInfo.ProgressMs = _lastTrackInfo.DurationMs;
-                        _lastTrackInfo.IsPlaying = false;
+                        progressToReturn = _lastTrackInfo.DurationMs;
+                        // Return a copy marked as not playing (do not mutate cached state)
+                        return new SpotifyTrackInfo
+                        {
+                            Title = _lastTrackInfo.Title,
+                            Artist = _lastTrackInfo.Artist,
+                            Album = _lastTrackInfo.Album,
+                            AlbumCoverUrl = _lastTrackInfo.AlbumCoverUrl,
+                            ProgressMs = progressToReturn,
+                            DurationMs = _lastTrackInfo.DurationMs,
+                            SpotifyUri = _lastTrackInfo.SpotifyUri,
+                            ScannableCodeUrl = _lastTrackInfo.ScannableCodeUrl,
+                            IsPlaying = false
+                        };
                     }
-                    else
-                    {
-                        _lastTrackInfo.ProgressMs = advancedProgress;
-                    }
-                    // Move the last sync cursor forward so subsequent calls only add new elapsed time
-                    _lastSyncUtc = now;
+
+                    progressToReturn = advancedProgress;
                 }
-                // Return a shallow copy to avoid external mutation of our cache
+
+                // Still playing, return advanced progress (no cache mutation, no _lastSyncUtc update)
                 return new SpotifyTrackInfo
                 {
                     Title = _lastTrackInfo.Title,
                     Artist = _lastTrackInfo.Artist,
                     Album = _lastTrackInfo.Album,
                     AlbumCoverUrl = _lastTrackInfo.AlbumCoverUrl,
-                    ProgressMs = _lastTrackInfo.ProgressMs,
+                    ProgressMs = progressToReturn,
                     DurationMs = _lastTrackInfo.DurationMs,
                     SpotifyUri = _lastTrackInfo.SpotifyUri,
                     ScannableCodeUrl = _lastTrackInfo.ScannableCodeUrl,
-                    IsPlaying = _lastTrackInfo.IsPlaying
+                    IsPlaying = true
                 };
             }
 
-            // If paused and we have cached info, just return it as-is.
+            // If paused and we have cached info, just return a copy as-is.
             return new SpotifyTrackInfo
             {
                 Title = _lastTrackInfo.Title,
