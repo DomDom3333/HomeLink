@@ -55,7 +55,7 @@ public class DisplayController : ControllerBase
 
             // Ensure cache/etag headers are included even on 304 responses
             Response.Headers.ETag = etag;
-            Response.Headers["Cache-Control"] = "no-store, private";
+            Response.Headers["Cache-Control"] = "no-store, no-transform, private";
             Response.Headers["Pragma"] = "no-cache";
 
             // Check If-None-Match header before rendering
@@ -73,6 +73,7 @@ public class DisplayController : ControllerBase
             Response.Headers["X-Height"] = bitmap.Height.ToString();
             Response.Headers["X-BytesPerLine"] = bitmap.BytesPerLine.ToString();
             Response.Headers["X-Dithered"] = dither ? "true" : "false";
+            Response.ContentLength = bitmap.PackedData.Length;
             // Diagnostic header - echo device battery when provided (helps confirm public URL received the query)
             if (deviceBattery.HasValue)
                 Response.Headers["X-Device-Battery"] = deviceBattery.Value.ToString();
