@@ -53,6 +53,11 @@ public class DisplayController : ControllerBase
             // Compute ETag from stable source data (excluding volatile timestamps)
             string etag = ComputeSourceDataEtag(spotifyData, locationData, dither, deviceBattery);
 
+            // Ensure cache/etag headers are included even on 304 responses
+            Response.Headers.ETag = etag;
+            Response.Headers["Cache-Control"] = "no-store, private";
+            Response.Headers["Pragma"] = "no-cache";
+
             // Check If-None-Match header before rendering
             if (Request.Headers.IfNoneMatch.Count > 0 && Request.Headers.IfNoneMatch.Contains(etag))
             {
@@ -68,10 +73,6 @@ public class DisplayController : ControllerBase
             Response.Headers["X-Height"] = bitmap.Height.ToString();
             Response.Headers["X-BytesPerLine"] = bitmap.BytesPerLine.ToString();
             Response.Headers["X-Dithered"] = dither ? "true" : "false";
-            Response.Headers.ETag = etag;
-            // Prevent intermediaries (CDNs/proxies) from caching or altering the binary response
-            Response.Headers["Cache-Control"] = "no-store, no-transform, private";
-            Response.Headers["Pragma"] = "no-cache";
             // Diagnostic header - echo device battery when provided (helps confirm public URL received the query)
             if (deviceBattery.HasValue)
                 Response.Headers["X-Device-Battery"] = deviceBattery.Value.ToString();
@@ -92,19 +93,19 @@ public class DisplayController : ControllerBase
     private static string ComputeSourceDataEtag(SpotifyTrackInfo? spotify, LocationInfo? location, bool dither, int? deviceBattery = null)
     {
         var sb = new StringBuilder();
-        
+
         // Include dither setting
         sb.Append($"dither:{dither}|");
-        
-        // Include device battery (for low battery warning state changes)
+
+        // Include device battery in coarse buckets to avoid noise
         if (deviceBattery.HasValue)
         {
-            // Only include threshold-relevant state (above or below 10%)
-            sb.Append($"deviceBatteryLow:{(deviceBattery.Value < 10)}|");
-            sb.Append($"deviceBattery:{deviceBattery.Value % 10 == 0}|");
+            int clampedBattery = Math.Clamp(deviceBattery.Value, 0, 100);
+            int batteryBucket = clampedBattery / 10; // 0..10
+            sb.Append($"deviceBatteryBucket:{batteryBucket}|");
         }
-        
-        // Include stable Spotify fields (exclude ProgressMs as it changes constantly)
+
+        // Include stable Spotify fields (exclude raw ProgressMs)
         if (spotify != null)
         {
             sb.Append($"spotify:");
@@ -115,9 +116,10 @@ public class DisplayController : ControllerBase
             sb.Append($"duration:{spotify.DurationMs}|");
             sb.Append($"uri:{spotify.SpotifyUri}|");
             sb.Append($"playing:{spotify.IsPlaying}|");
-            sb.Append($"progressMs:{spotify.ProgressMs}|");
+            long progressBucket10s = Math.Max(0L, spotify.ProgressMs) / 10000L;
+            sb.Append($"progressMin:{progressBucket10s}|");
         }
-        
+
         // Include stable Location fields (exclude timestamps, battery, velocity, etc.)
         if (location != null)
         {
@@ -136,7 +138,7 @@ public class DisplayController : ControllerBase
             // Exclude: BatteryLevel, BatteryStatus, Accuracy, Altitude, Velocity, Timestamp
             // (these change frequently but don't affect the display meaningfully)
         }
-        
+
         string content = sb.ToString();
         byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(content));
         string tag = Convert.ToHexString(hash);

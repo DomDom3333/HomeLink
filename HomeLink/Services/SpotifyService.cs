@@ -19,6 +19,7 @@ public class SpotifyService
     private SpotifyTrackInfo? _lastTrackInfo;
     // Track when we last synchronized with Spotify and the device-reported progress at that time
     private DateTime _lastSyncUtc = DateTime.MinValue;
+    private static readonly TimeSpan MaxOptimisticCacheAge = TimeSpan.FromSeconds(15);
 
     public SpotifyService(ILogger<SpotifyService> logger, string? clientId, string? clientSecret, string? refreshToken = null, DateTime? expiry = null)
     {
@@ -199,14 +200,24 @@ public class SpotifyService
         }
     }
 
+    private DateTime GetLastSyncUtc()
+    {
+        lock (_cacheLock)
+        {
+            return _lastSyncUtc;
+        }
+    }
+
     public async Task<SpotifyTrackInfo?> GetCurrentlyPlayingAsync()
     {
         // First, if we have cached info and the song hasn't ended yet, return the locally advanced value
         SpotifyTrackInfo? cached = GetOptimisticallyAdvancedCachedTrack();
         if (cached != null && cached.IsPlaying)
         {
-            // We can safely return without polling if we're still within the track duration
-            if (cached.ProgressMs < cached.DurationMs)
+            DateTime lastSyncUtc = GetLastSyncUtc();
+            TimeSpan cacheAge = DateTime.UtcNow - lastSyncUtc;
+            // Only trust optimistic cache for a short window to detect skips/pauses promptly.
+            if (cached.ProgressMs < cached.DurationMs && cacheAge <= MaxOptimisticCacheAge)
             {
                 return cached;
             }
