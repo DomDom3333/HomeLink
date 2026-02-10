@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using HomeLink.Services;
+using System.Diagnostics;
 using System.Text.Json.Serialization;
 using HomeLink.Models;
 
@@ -153,6 +154,13 @@ public class LocationController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status500InternalServerError)]
     public async Task<ActionResult<object>> ReceiveOwnTracksUpdate([FromBody] OwnTracksPayload payload)
     {
+        long startTimestamp = Stopwatch.GetTimestamp();
+        HomeLinkTelemetry.LocationUpdates.Add(1);
+
+        using Activity? activity = HomeLinkTelemetry.ActivitySource.StartActivity("LocationController.ReceiveOwnTracksUpdate", ActivityKind.Server);
+        activity?.SetTag("owntracks.type", payload.Type);
+        activity?.SetTag("owntracks.tracker_id", payload.TrackerId);
+
         _logger.LogInformation("ReceiveOwnTracksUpdate request received. Type: {Type}, TrackerId: {TrackerId}", payload.Type, payload.TrackerId);
 
         // OwnTracks sends different message types, we only care about location updates
@@ -161,12 +169,15 @@ public class LocationController : ControllerBase
             _logger.LogDebug("Received non-location OwnTracks message of type: {Type}", payload.Type);
             // Return empty array as per OwnTracks protocol for non-location messages
             _logger.LogInformation("ReceiveOwnTracksUpdate returning empty response for non-location payload.");
+            activity?.SetTag("http.response.status_code", 200);
             return Ok(Array.Empty<object>());
         }
 
         if (!payload.Latitude.HasValue || !payload.Longitude.HasValue)
         {
             _logger.LogWarning("Received OwnTracks location update without coordinates");
+            activity?.SetTag("error", true);
+            activity?.SetTag("http.response.status_code", 400);
             return BadRequest(new ErrorResponse { Error = "Missing latitude or longitude" });
         }
 
@@ -200,12 +211,22 @@ public class LocationController : ControllerBase
             // OwnTracks expects an array response (can contain commands to send back)
             // Empty array means no commands
             _logger.LogInformation("ReceiveOwnTracksUpdate processed successfully. Returning empty command array.");
+            activity?.SetTag("http.response.status_code", 200);
             return Ok(Array.Empty<object>());
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing OwnTracks location update");
+            activity?.SetTag("error", true);
+            activity?.SetTag("http.response.status_code", 500);
+            activity?.AddException(ex);
             return StatusCode(500, new ErrorResponse { Error = "Failed to process location update" });
+        }
+        finally
+        {
+            double elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+            HomeLinkTelemetry.LocationLookupDurationMs.Record(elapsedMs);
+            activity?.SetTag("location.update.duration_ms", elapsedMs);
         }
     }
 }

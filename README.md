@@ -68,6 +68,39 @@ docker run --rm -p 5119:8080 `
 ```
 Note: The container listens on 8080; we map to 5119 externally for consistency with `HomeLink.http`.
 
+## Observability (OpenTelemetry)
+HomeLink is instrumented end-to-end with OpenTelemetry for traces and metrics.
+
+What is captured:
+- Incoming HTTP request traces (ASP.NET Core instrumentation).
+- Outgoing HTTP calls (Spotify + Nominatim/map fetches via HttpClient instrumentation).
+- Runtime + process metrics (GC, CPU, memory, threads).
+- Custom HomeLink metrics:
+  - `homelink.display.render.requests`
+  - `homelink.display.render.duration` (ms)
+  - `homelink.location.updates`
+  - `homelink.location.lookup.duration` (ms)
+  - `homelink.spotify.requests`
+  - `homelink.spotify.currently_playing.duration` (ms)
+- Correlation header: each response includes `X-Trace-Id`.
+
+Configuration:
+- `OpenTelemetry:ServiceName` (default `HomeLink.Api`)
+- `OpenTelemetry:Otlp:Endpoint` (when set, OTLP exporter is used for traces + metrics)
+- If OTLP endpoint is empty, telemetry is exported to console.
+
+Example OTLP endpoint values:
+- `http://localhost:4317` (gRPC)
+- `http://localhost:4318` (HTTP/protobuf)
+
+For Docker:
+```powershell
+docker run --rm -p 5119:8080 `
+  -e SPOTIFY_REFRESH_TOKEN="<your-refresh-token>" `
+  -e OpenTelemetry__Otlp__Endpoint="http://host.docker.internal:4317" `
+  homelink:local
+```
+
 ## API endpoints
 Unless noted, all endpoints are under the root URL (e.g., `http://localhost:5119`).
 

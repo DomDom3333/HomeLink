@@ -1,4 +1,5 @@
-﻿using System.Security.Cryptography;
+﻿using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text;
 using HomeLink.Models;
 using Microsoft.AspNetCore.Mvc;
@@ -37,11 +38,23 @@ public class DisplayController : ControllerBase
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> RenderDisplay([FromQuery] bool dither = true, [FromQuery] int? deviceBattery = null)
     {
+        long startTimestamp = Stopwatch.GetTimestamp();
+        HomeLinkTelemetry.DisplayRenderRequests.Add(1);
+
+        using Activity? activity = HomeLinkTelemetry.ActivitySource.StartActivity("DisplayController.RenderDisplay", ActivityKind.Server);
+        activity?.SetTag("display.dither", dither);
+        if (deviceBattery.HasValue)
+        {
+            activity?.SetTag("display.device_battery", deviceBattery.Value);
+        }
+
         _logger.LogInformation("RenderDisplay request received. Dither: {Dither}, DeviceBattery: {DeviceBattery}", dither, deviceBattery);
 
         if (!_spotifyService.IsAuthorized)
         {
             _logger.LogWarning("RenderDisplay denied: Spotify is not authorized.");
+            activity?.SetTag("error", true);
+            activity?.SetTag("http.response.status_code", 401);
             return Unauthorized(new ErrorResponse { Error = "Spotify is not authorized. Please visit /api/spotify/authorize first." });
         }
 
@@ -62,6 +75,7 @@ public class DisplayController : ControllerBase
             if (Request.Headers.IfNoneMatch.Count > 0 && Request.Headers.IfNoneMatch.Contains(etag))
             {
                 _logger.LogInformation("RenderDisplay returning 304 Not Modified. ETag: {Etag}", etag);
+                activity?.SetTag("http.response.status_code", 304);
                 return StatusCode(StatusCodes.Status304NotModified);
             }
 
@@ -82,12 +96,24 @@ public class DisplayController : ControllerBase
 
             // Body is raw packed bytes (e.g. 64800 bytes for 960x540 @ 1bpp)
             _logger.LogInformation("RenderDisplay returning bitmap bytes. Width: {Width}, Height: {Height}, Bytes: {ByteCount}", bitmap.Width, bitmap.Height, bitmap.PackedData.Length);
+            activity?.SetTag("http.response.status_code", 200);
+            activity?.SetTag("display.bitmap.width", bitmap.Width);
+            activity?.SetTag("display.bitmap.height", bitmap.Height);
             return File(bitmap.PackedData, "application/octet-stream");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "RenderDisplay failed.");
+            activity?.SetTag("error", true);
+            activity?.SetTag("http.response.status_code", 400);
+            activity?.AddException(ex);
             return BadRequest(new ErrorResponse { Error = ex.Message });
+        }
+        finally
+        {
+            double elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+            HomeLinkTelemetry.DisplayRenderDurationMs.Record(elapsedMs);
+            activity?.SetTag("display.duration_ms", elapsedMs);
         }
     }
 
