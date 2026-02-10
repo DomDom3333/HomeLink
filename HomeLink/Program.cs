@@ -91,11 +91,13 @@ public static class Program
         }
 
         builder.Services.AddSingleton<TelemetryDashboardState>();
+        builder.Services.AddSingleton<Services.StatePersistenceService>();
 
         builder.Services.AddSingleton<Services.SpotifyService>(sp =>
             new Services.SpotifyService(
                 sp.GetRequiredService<ILogger<Services.SpotifyService>>(),
                 sp.GetRequiredService<TelemetryDashboardState>(),
+                sp.GetRequiredService<Services.StatePersistenceService>(),
                 spotifyClientId,
                 spotifyClientSecret,
                 spotifyRefreshToken,

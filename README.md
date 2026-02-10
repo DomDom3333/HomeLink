@@ -2,11 +2,13 @@
 
 HomeLink is a small ASP.NET Core Web API that renders a composite image for a LilyGO T5 e‑ink display by combining your current Spotify playback and your latest location (from OwnTracks). It exposes endpoints to:
 - Receive OwnTracks location updates and cache them.
+- Persist the latest location and Spotify state to a local SQLite database so state survives restarts.
 - Query Spotify “currently playing” and render a 1‑bit packed bitmap tailored for the T5 display, or a PNG preview.
 
 ## Highlights
 - Spotify integration via refresh-token flow using SpotifyAPI.Web.
 - OwnTracks-compatible webhook to cache location and metadata.
+- Local SQLite state store (`state/homelink-state.db`) for last-known location and track.
 - Rich drawing pipeline with dithering, layout, and album art fetch in `DrawingService`.
 - Simple to run locally or in Docker; optional OpenAPI docs in Development.
 
@@ -14,8 +16,9 @@ HomeLink is a small ASP.NET Core Web API that renders a composite image for a Li
 - `Program.cs`: DI setup, reads Spotify env vars, configures controllers and OpenAPI.
 - `Controllers/DisplayController.cs`: Renders display bitmap/PNG using services.
 - `Controllers/LocationController.cs`: OwnTracks webhook (`/api/location/owntracks`) to cache location.
-- `Services/SpotifyService.cs`: Handles token refresh and “currently playing” fetch.
-- `Services/LocationService.cs`: Caches location, enriches with human-readable info.
+- `Services/SpotifyService.cs`: Handles token refresh and “currently playing” fetch, persists/restores last track state.
+- `Services/LocationService.cs`: Caches location, enriches with human-readable info, persists/restores last state.
+- `Services/StatePersistenceService.cs`: Manages SQLite persistence for last-known location and Spotify track.
 - `Services/DrawingService.cs`: Composes the image (text, icons, album art) and outputs bitmap/PNG.
 - `HomeLink.http`: Handy local request examples.
 
@@ -130,9 +133,10 @@ Additional convenience requests (see `HomeLink.http`):
 - `GET /api/spotify/authorize`, `GET /api/spotify/status`, `GET /api/spotify/info` — helper endpoints may exist in some branches to guide OAuth; availability depends on your current code.
 
 ## Data flow
-1. OwnTracks posts a `location` payload to `/api/location/owntracks`. `LocationService` caches the coordinates and metadata (accuracy, altitude, battery, etc.).
-2. When you request `/api/display/render` or `/api/display/image`, the app fetches your Spotify “currently playing” using `SpotifyService` and combines it with the cached location.
-3. `DrawingService` composes text, icons, album art, and other accents, applies dithering, and returns either:
+1. On startup, HomeLink restores the last persisted location/Spotify state from `state/homelink-state.db` if present.
+2. OwnTracks posts a `location` payload to `/api/location/owntracks`. `LocationService` caches coordinates + metadata and persists them to SQLite.
+3. When you request `/api/display/render` or `/api/display/image`, the app fetches Spotify “currently playing” using `SpotifyService`, updates persisted Spotify state, and combines this with cached location.
+4. `DrawingService` composes text, icons, album art, and other accents, applies dithering, and returns either:
    - A 1‑bit packed bitmap (base64) for embedded devices, or
    - A PNG for quick preview.
 
@@ -160,6 +164,7 @@ Use the bundled `HomeLink.http` file with an HTTP client (JetBrains Rider, VS Co
   - If Spotify requires client authentication for token refresh, also set `SPOTIFY_ID` and `SPOTIFY_SECRET`.
 - Empty or paused Spotify info
   - If nothing is currently playing, the app returns the last known track marked as `IsPlaying = false`.
+  - If Spotify is temporarily unreachable, HomeLink falls back to the last persisted Spotify state when available.
 - No location appearing on display
   - Verify you sent an OwnTracks `location` message and the app logged a cached location update.
 - Port/URL issues
