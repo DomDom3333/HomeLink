@@ -12,6 +12,7 @@ public class SpotifyService
     private readonly string? _clientId;
     private readonly string? _clientSecret;
     private readonly TelemetryDashboardState _dashboardState;
+    private readonly StatePersistenceService _statePersistenceService;
     private readonly object _tokenLock = new();
     private readonly object _cacheLock = new();
     private readonly SemaphoreSlim _refreshSemaphore = new(1, 1);
@@ -24,10 +25,11 @@ public class SpotifyService
     private DateTime _lastSyncUtc = DateTime.MinValue;
     private static readonly TimeSpan MaxOptimisticCacheAge = TimeSpan.FromSeconds(15);
 
-    public SpotifyService(ILogger<SpotifyService> logger, TelemetryDashboardState dashboardState, string? clientId, string? clientSecret, string? refreshToken = null, DateTime? expiry = null)
+    public SpotifyService(ILogger<SpotifyService> logger, TelemetryDashboardState dashboardState, StatePersistenceService statePersistenceService, string? clientId, string? clientSecret, string? refreshToken = null, DateTime? expiry = null)
     {
         _logger = logger;
         _dashboardState = dashboardState;
+        _statePersistenceService = statePersistenceService;
         _clientId = string.IsNullOrWhiteSpace(clientId) ? null : clientId;
         _clientSecret = string.IsNullOrWhiteSpace(clientSecret) ? null : clientSecret;
 
@@ -38,6 +40,16 @@ public class SpotifyService
             {
                 _refreshToken = refreshToken;
                 _tokenExpiry = expiry ?? DateTime.MinValue;
+            }
+        }
+
+        (SpotifyTrackInfo TrackInfo, DateTime LastSyncUtc)? persisted = _statePersistenceService.LoadSpotifyTrackAsync().GetAwaiter().GetResult();
+        if (persisted.HasValue)
+        {
+            lock (_cacheLock)
+            {
+                _lastTrackInfo = persisted.Value.TrackInfo;
+                _lastSyncUtc = persisted.Value.LastSyncUtc;
             }
         }
     }
@@ -259,6 +271,10 @@ public class SpotifyService
                 throw;
             }
 
+            SpotifyTrackInfo? trackToPersist = null;
+            DateTime trackSyncUtc = DateTime.MinValue;
+            SpotifyTrackInfo? trackToReturn = null;
+
             lock (_cacheLock)
             {
                 if (currentlyPlaying?.Item is FullTrack track)
@@ -276,20 +292,32 @@ public class SpotifyService
                         IsPlaying = currentlyPlaying.IsPlaying
                     };
                     _lastSyncUtc = DateTime.UtcNow;
-                    return _lastTrackInfo;
+                    trackToPersist = _lastTrackInfo;
+                    trackSyncUtc = _lastSyncUtc;
+                    trackToReturn = _lastTrackInfo;
                 }
-
-                if (currentlyPlaying == null)
+                else
                 {
-                    _logger.LogWarning("Spotify currently-playing response was empty.");
-                }
+                    if (currentlyPlaying == null)
+                    {
+                        _logger.LogWarning("Spotify currently-playing response was empty.");
+                    }
 
-                if (_lastTrackInfo != null)
-                {
-                    // If nothing is playing, return the last known track but marked as paused
-                    _lastTrackInfo.IsPlaying = false;
-                    return _lastTrackInfo;
+                    if (_lastTrackInfo != null)
+                    {
+                        // If nothing is playing, return the last known track but marked as paused
+                        _lastTrackInfo.IsPlaying = false;
+                        trackToPersist = _lastTrackInfo;
+                        trackSyncUtc = _lastSyncUtc;
+                        trackToReturn = _lastTrackInfo;
+                    }
                 }
+            }
+
+            if (trackToPersist != null)
+            {
+                await _statePersistenceService.SaveSpotifyTrackAsync(trackToPersist, trackSyncUtc);
+                return trackToReturn;
             }
 
             return null;
@@ -299,6 +327,14 @@ public class SpotifyService
             isError = true;
             activity?.SetTag("error", true);
             activity?.AddException(ex);
+
+            SpotifyTrackInfo? fallbackTrack = GetOptimisticallyAdvancedCachedTrack();
+            if (fallbackTrack != null)
+            {
+                _logger.LogWarning(ex, "Spotify request failed, returning last cached Spotify state from persistence/memory.");
+                return fallbackTrack;
+            }
+
             throw;
         }
         finally

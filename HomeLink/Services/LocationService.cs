@@ -8,6 +8,7 @@ public class LocationService
 {
     private readonly HttpClient _httpClient;
     private readonly HumanReadableService _humanReadableService;
+    private readonly StatePersistenceService _statePersistenceService;
     private readonly List<KnownLocation> _knownLocations = new();
     private const string NominatimBaseUrl = "https://nominatim.openstreetmap.org/reverse";
     private const double EarthRadiusMeters = 6371000;
@@ -15,14 +16,17 @@ public class LocationService
     // Cached location data
     private LocationInfo? _cachedLocation;
 
-    public LocationService(HttpClient httpClient)
+    public LocationService(HttpClient httpClient, StatePersistenceService statePersistenceService)
     {
         _httpClient = httpClient;
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("HomeLink/1.0");
         _humanReadableService = new HumanReadableService();
+        _statePersistenceService = statePersistenceService;
 
         // Load known locations from environment variable KNOWN_LOCATIONS (see loader comment for format)
         LoadKnownLocationsFromEnv();
+
+        _cachedLocation = _statePersistenceService.LoadLocationAsync().GetAwaiter().GetResult();
     }
 
     #region Cached Location
@@ -65,6 +69,7 @@ public class LocationService
             }
             
             _cachedLocation = location;
+            await _statePersistenceService.SaveLocationAsync(location);
         }
         return location;
     }
