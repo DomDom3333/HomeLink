@@ -1,5 +1,6 @@
 ﻿using System.Diagnostics;
 using HomeLink.Models;
+using HomeLink.Telemetry;
 using Microsoft.Extensions.Logging;
 using SpotifyAPI.Web;
 
@@ -10,6 +11,7 @@ public class SpotifyService
     private readonly ILogger<SpotifyService> _logger;
     private readonly string? _clientId;
     private readonly string? _clientSecret;
+    private readonly TelemetryDashboardState _dashboardState;
     private readonly object _tokenLock = new();
     private readonly object _cacheLock = new();
     private readonly SemaphoreSlim _refreshSemaphore = new(1, 1);
@@ -22,9 +24,10 @@ public class SpotifyService
     private DateTime _lastSyncUtc = DateTime.MinValue;
     private static readonly TimeSpan MaxOptimisticCacheAge = TimeSpan.FromSeconds(15);
 
-    public SpotifyService(ILogger<SpotifyService> logger, string? clientId, string? clientSecret, string? refreshToken = null, DateTime? expiry = null)
+    public SpotifyService(ILogger<SpotifyService> logger, TelemetryDashboardState dashboardState, string? clientId, string? clientSecret, string? refreshToken = null, DateTime? expiry = null)
     {
         _logger = logger;
+        _dashboardState = dashboardState;
         _clientId = string.IsNullOrWhiteSpace(clientId) ? null : clientId;
         _clientSecret = string.IsNullOrWhiteSpace(clientSecret) ? null : clientSecret;
 
@@ -212,6 +215,7 @@ public class SpotifyService
     public async Task<SpotifyTrackInfo?> GetCurrentlyPlayingAsync()
     {
         long startTimestamp = Stopwatch.GetTimestamp();
+        bool isError = false;
         HomeLinkTelemetry.SpotifyRequests.Add(1);
 
         using Activity? activity = HomeLinkTelemetry.ActivitySource.StartActivity("SpotifyService.GetCurrentlyPlaying", ActivityKind.Internal);
@@ -292,6 +296,7 @@ public class SpotifyService
         }
         catch (Exception ex)
         {
+            isError = true;
             activity?.SetTag("error", true);
             activity?.AddException(ex);
             throw;
@@ -300,6 +305,7 @@ public class SpotifyService
         {
             double elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
             HomeLinkTelemetry.SpotifyRequestDurationMs.Record(elapsedMs);
+            _dashboardState.RecordSpotify(elapsedMs, isError);
             activity?.SetTag("spotify.request.duration_ms", elapsedMs);
         }
     }

@@ -3,6 +3,7 @@ using HomeLink.Services;
 using System.Diagnostics;
 using System.Text.Json.Serialization;
 using HomeLink.Models;
+using HomeLink.Telemetry;
 
 namespace HomeLink.Controllers;
 
@@ -133,11 +134,13 @@ public class LocationController : ControllerBase
 {
     private readonly LocationService _locationService;
     private readonly ILogger<LocationController> _logger;
+    private readonly TelemetryDashboardState _dashboardState;
 
-    public LocationController(LocationService locationService, ILogger<LocationController> logger)
+    public LocationController(LocationService locationService, ILogger<LocationController> logger, TelemetryDashboardState dashboardState)
     {
         _locationService = locationService;
         _logger = logger;
+        _dashboardState = dashboardState;
     }
 
     /// <summary>
@@ -155,6 +158,7 @@ public class LocationController : ControllerBase
     public async Task<ActionResult<object>> ReceiveOwnTracksUpdate([FromBody] OwnTracksPayload payload)
     {
         long startTimestamp = Stopwatch.GetTimestamp();
+        bool isError = false;
         HomeLinkTelemetry.LocationUpdates.Add(1);
 
         using Activity? activity = HomeLinkTelemetry.ActivitySource.StartActivity("LocationController.ReceiveOwnTracksUpdate", ActivityKind.Server);
@@ -176,6 +180,7 @@ public class LocationController : ControllerBase
         if (!payload.Latitude.HasValue || !payload.Longitude.HasValue)
         {
             _logger.LogWarning("Received OwnTracks location update without coordinates");
+            isError = true;
             activity?.SetTag("error", true);
             activity?.SetTag("http.response.status_code", 400);
             return BadRequest(new ErrorResponse { Error = "Missing latitude or longitude" });
@@ -217,6 +222,7 @@ public class LocationController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing OwnTracks location update");
+            isError = true;
             activity?.SetTag("error", true);
             activity?.SetTag("http.response.status_code", 500);
             activity?.AddException(ex);
@@ -226,6 +232,7 @@ public class LocationController : ControllerBase
         {
             double elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
             HomeLinkTelemetry.LocationLookupDurationMs.Record(elapsedMs);
+            _dashboardState.RecordLocation(elapsedMs, isError);
             activity?.SetTag("location.update.duration_ms", elapsedMs);
         }
     }

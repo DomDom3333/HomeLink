@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.HttpLogging;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using HomeLink.Telemetry;
 
 public static class Program
 {
@@ -89,9 +90,12 @@ public static class Program
             }
         }
 
+        builder.Services.AddSingleton<TelemetryDashboardState>();
+
         builder.Services.AddSingleton<Services.SpotifyService>(sp =>
             new Services.SpotifyService(
                 sp.GetRequiredService<ILogger<Services.SpotifyService>>(),
+                sp.GetRequiredService<TelemetryDashboardState>(),
                 spotifyClientId,
                 spotifyClientSecret,
                 spotifyRefreshToken,
@@ -132,11 +136,22 @@ public static class Program
         app.MapOpenApi();
         app.MapHealthChecks("/health");
 
+        app.MapGet("/api/telemetry/summary", (TelemetryDashboardState dashboardState) =>
+            Results.Ok(dashboardState.CreateSnapshot()));
+
+        app.MapGet("/telemetry/dashboard", () =>
+            Results.Content(TelemetryDashboardPage.Html, "text/html"));
+
         app.Use(async (context, next) =>
         {
+            context.Response.OnStarting(() =>
+            {
+                string traceId = Activity.Current?.TraceId.ToString() ?? context.TraceIdentifier;
+                context.Response.Headers["X-Trace-Id"] = traceId;
+                return Task.CompletedTask;
+            });
+
             await next();
-            string traceId = Activity.Current?.TraceId.ToString() ?? context.TraceIdentifier;
-            context.Response.Headers["X-Trace-Id"] = traceId;
         });
 
         app.UseHttpLogging();

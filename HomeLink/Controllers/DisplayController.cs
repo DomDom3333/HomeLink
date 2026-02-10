@@ -4,6 +4,7 @@ using System.Text;
 using HomeLink.Models;
 using Microsoft.AspNetCore.Mvc;
 using HomeLink.Services;
+using HomeLink.Telemetry;
 
 namespace HomeLink.Controllers;
 
@@ -15,13 +16,15 @@ public class DisplayController : ControllerBase
     private readonly SpotifyService _spotifyService;
     private readonly LocationService _locationService;
     private readonly ILogger<DisplayController> _logger;
+    private readonly TelemetryDashboardState _dashboardState;
 
-    public DisplayController(DrawingService drawingService, SpotifyService spotifyService, LocationService locationService, ILogger<DisplayController> logger)
+    public DisplayController(DrawingService drawingService, SpotifyService spotifyService, LocationService locationService, ILogger<DisplayController> logger, TelemetryDashboardState dashboardState)
     {
         _drawingService = drawingService;
         _spotifyService = spotifyService;
         _locationService = locationService;
         _logger = logger;
+        _dashboardState = dashboardState;
     }
 
     /// <summary>
@@ -39,6 +42,7 @@ public class DisplayController : ControllerBase
     public async Task<IActionResult> RenderDisplay([FromQuery] bool dither = true, [FromQuery] int? deviceBattery = null)
     {
         long startTimestamp = Stopwatch.GetTimestamp();
+        bool isError = false;
         HomeLinkTelemetry.DisplayRenderRequests.Add(1);
 
         using Activity? activity = HomeLinkTelemetry.ActivitySource.StartActivity("DisplayController.RenderDisplay", ActivityKind.Server);
@@ -53,6 +57,7 @@ public class DisplayController : ControllerBase
         if (!_spotifyService.IsAuthorized)
         {
             _logger.LogWarning("RenderDisplay denied: Spotify is not authorized.");
+            isError = true;
             activity?.SetTag("error", true);
             activity?.SetTag("http.response.status_code", 401);
             return Unauthorized(new ErrorResponse { Error = "Spotify is not authorized. Please visit /api/spotify/authorize first." });
@@ -104,6 +109,7 @@ public class DisplayController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "RenderDisplay failed.");
+            isError = true;
             activity?.SetTag("error", true);
             activity?.SetTag("http.response.status_code", 400);
             activity?.AddException(ex);
@@ -113,6 +119,7 @@ public class DisplayController : ControllerBase
         {
             double elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
             HomeLinkTelemetry.DisplayRenderDurationMs.Record(elapsedMs);
+            _dashboardState.RecordDisplay(elapsedMs, isError);
             activity?.SetTag("display.duration_ms", elapsedMs);
         }
     }

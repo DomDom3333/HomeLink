@@ -83,6 +83,7 @@ What is captured:
   - `homelink.spotify.requests`
   - `homelink.spotify.currently_playing.duration` (ms)
 - Correlation header: each response includes `X-Trace-Id`.
+- Built-in dashboard UI at `/telemetry/dashboard` for a quick live view of request counts, error rates, and durations.
 
 Configuration:
 - `OpenTelemetry:ServiceName` (default `HomeLink.Api`)
@@ -100,6 +101,9 @@ docker run --rm -p 5119:8080 `
   -e OpenTelemetry__Otlp__Endpoint="http://host.docker.internal:4317" `
   homelink:local
 ```
+
+Quick local visibility:
+- Open `http://localhost:5119/telemetry/dashboard` for a simple live dashboard.
 
 ## API endpoints
 Unless noted, all endpoints are under the root URL (e.g., `http://localhost:5119`).
