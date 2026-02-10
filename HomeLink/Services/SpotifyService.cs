@@ -1,4 +1,6 @@
-﻿using HomeLink.Models;
+﻿using System.Diagnostics;
+using HomeLink.Models;
+using HomeLink.Telemetry;
 using Microsoft.Extensions.Logging;
 using SpotifyAPI.Web;
 
@@ -9,6 +11,7 @@ public class SpotifyService
     private readonly ILogger<SpotifyService> _logger;
     private readonly string? _clientId;
     private readonly string? _clientSecret;
+    private readonly TelemetryDashboardState _dashboardState;
     private readonly object _tokenLock = new();
     private readonly object _cacheLock = new();
     private readonly SemaphoreSlim _refreshSemaphore = new(1, 1);
@@ -21,9 +24,10 @@ public class SpotifyService
     private DateTime _lastSyncUtc = DateTime.MinValue;
     private static readonly TimeSpan MaxOptimisticCacheAge = TimeSpan.FromSeconds(15);
 
-    public SpotifyService(ILogger<SpotifyService> logger, string? clientId, string? clientSecret, string? refreshToken = null, DateTime? expiry = null)
+    public SpotifyService(ILogger<SpotifyService> logger, TelemetryDashboardState dashboardState, string? clientId, string? clientSecret, string? refreshToken = null, DateTime? expiry = null)
     {
         _logger = logger;
+        _dashboardState = dashboardState;
         _clientId = string.IsNullOrWhiteSpace(clientId) ? null : clientId;
         _clientSecret = string.IsNullOrWhiteSpace(clientSecret) ? null : clientSecret;
 
@@ -210,76 +214,99 @@ public class SpotifyService
 
     public async Task<SpotifyTrackInfo?> GetCurrentlyPlayingAsync()
     {
-        // First, if we have cached info and the song hasn't ended yet, return the locally advanced value
-        SpotifyTrackInfo? cached = GetOptimisticallyAdvancedCachedTrack();
-        if (cached != null && cached.IsPlaying)
-        {
-            DateTime lastSyncUtc = GetLastSyncUtc();
-            TimeSpan cacheAge = DateTime.UtcNow - lastSyncUtc;
-            // Only trust optimistic cache for a short window to detect skips/pauses promptly.
-            if (cached.ProgressMs < cached.DurationMs && cacheAge <= MaxOptimisticCacheAge)
-            {
-                return cached;
-            }
-        }
+        long startTimestamp = Stopwatch.GetTimestamp();
+        bool isError = false;
+        HomeLinkTelemetry.SpotifyRequests.Add(1);
 
-        SpotifyClient client = await GetClientAsync();
-        CurrentlyPlaying? currentlyPlaying;
+        using Activity? activity = HomeLinkTelemetry.ActivitySource.StartActivity("SpotifyService.GetCurrentlyPlaying", ActivityKind.Internal);
+
         try
         {
-            _logger.LogInformation("Calling Spotify currently-playing endpoint.");
-            currentlyPlaying = await client.Player.GetCurrentlyPlaying(new PlayerCurrentlyPlayingRequest());
-            _logger.LogInformation("Spotify currently-playing response received. HasItem: {HasItem}, IsPlaying: {IsPlaying}.", currentlyPlaying?.Item != null, currentlyPlaying?.IsPlaying);
-        }
-        catch (APIUnauthorizedException)
-        {
-            // Access tokens can be invalidated before local expiry. Force a refresh and retry once.
-            _logger.LogWarning("Spotify currently-playing call returned 401 Unauthorized. Forcing token refresh and retrying once.");
-            string accessToken = await EnsureAccessTokenAsync(forceRefresh: true);
-            SpotifyClient refreshedClient = new SpotifyClient(SpotifyClientConfig.CreateDefault().WithToken(accessToken));
-            _logger.LogInformation("Retrying Spotify currently-playing endpoint after forced token refresh.");
-            currentlyPlaying = await refreshedClient.Player.GetCurrentlyPlaying(new PlayerCurrentlyPlayingRequest());
-            _logger.LogInformation("Spotify currently-playing retry response received. HasItem: {HasItem}, IsPlaying: {IsPlaying}.", currentlyPlaying?.Item != null, currentlyPlaying?.IsPlaying);
+            // First, if we have cached info and the song hasn't ended yet, return the locally advanced value
+            SpotifyTrackInfo? cached = GetOptimisticallyAdvancedCachedTrack();
+            if (cached != null && cached.IsPlaying)
+            {
+                DateTime lastSyncUtc = GetLastSyncUtc();
+                TimeSpan cacheAge = DateTime.UtcNow - lastSyncUtc;
+                // Only trust optimistic cache for a short window to detect skips/pauses promptly.
+                if (cached.ProgressMs < cached.DurationMs && cacheAge <= MaxOptimisticCacheAge)
+                {
+                    return cached;
+                }
+            }
+
+            SpotifyClient client = await GetClientAsync();
+            CurrentlyPlaying? currentlyPlaying;
+            try
+            {
+                _logger.LogInformation("Calling Spotify currently-playing endpoint.");
+                currentlyPlaying = await client.Player.GetCurrentlyPlaying(new PlayerCurrentlyPlayingRequest());
+                _logger.LogInformation("Spotify currently-playing response received. HasItem: {HasItem}, IsPlaying: {IsPlaying}.", currentlyPlaying?.Item != null, currentlyPlaying?.IsPlaying);
+            }
+            catch (APIUnauthorizedException)
+            {
+                // Access tokens can be invalidated before local expiry. Force a refresh and retry once.
+                _logger.LogWarning("Spotify currently-playing call returned 401 Unauthorized. Forcing token refresh and retrying once.");
+                string accessToken = await EnsureAccessTokenAsync(forceRefresh: true);
+                SpotifyClient refreshedClient = new SpotifyClient(SpotifyClientConfig.CreateDefault().WithToken(accessToken));
+                _logger.LogInformation("Retrying Spotify currently-playing endpoint after forced token refresh.");
+                currentlyPlaying = await refreshedClient.Player.GetCurrentlyPlaying(new PlayerCurrentlyPlayingRequest());
+                _logger.LogInformation("Spotify currently-playing retry response received. HasItem: {HasItem}, IsPlaying: {IsPlaying}.", currentlyPlaying?.Item != null, currentlyPlaying?.IsPlaying);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Spotify currently-playing request failed.");
+                throw;
+            }
+
+            lock (_cacheLock)
+            {
+                if (currentlyPlaying?.Item is FullTrack track)
+                {
+                    _lastTrackInfo = new SpotifyTrackInfo
+                    {
+                        Title = track.Name,
+                        Artist = string.Join(", ", track.Artists.Select(a => a.Name)),
+                        Album = track.Album.Name,
+                        AlbumCoverUrl = track.Album.Images.FirstOrDefault()?.Url ?? string.Empty,
+                        ProgressMs = currentlyPlaying.ProgressMs ?? 0,
+                        DurationMs = track.DurationMs,
+                        SpotifyUri = track.Uri,
+                        ScannableCodeUrl = $"https://scannables.scdn.co/uri/plain/jpeg/000000/white/640/spotify:track:{track.Id}",
+                        IsPlaying = currentlyPlaying.IsPlaying
+                    };
+                    _lastSyncUtc = DateTime.UtcNow;
+                    return _lastTrackInfo;
+                }
+
+                if (currentlyPlaying == null)
+                {
+                    _logger.LogWarning("Spotify currently-playing response was empty.");
+                }
+
+                if (_lastTrackInfo != null)
+                {
+                    // If nothing is playing, return the last known track but marked as paused
+                    _lastTrackInfo.IsPlaying = false;
+                    return _lastTrackInfo;
+                }
+            }
+
+            return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Spotify currently-playing request failed.");
+            isError = true;
+            activity?.SetTag("error", true);
+            activity?.AddException(ex);
             throw;
         }
-        
-        lock (_cacheLock)
+        finally
         {
-            if (currentlyPlaying?.Item is FullTrack track)
-            {
-                _lastTrackInfo = new SpotifyTrackInfo
-                {
-                    Title = track.Name,
-                    Artist = string.Join(", ", track.Artists.Select(a => a.Name)),
-                    Album = track.Album.Name,
-                    AlbumCoverUrl = track.Album.Images.FirstOrDefault()?.Url ?? string.Empty,
-                    ProgressMs = currentlyPlaying.ProgressMs ?? 0,
-                    DurationMs = track.DurationMs,
-                    SpotifyUri = track.Uri,
-                    ScannableCodeUrl = $"https://scannables.scdn.co/uri/plain/jpeg/000000/white/640/spotify:track:{track.Id}",
-                    IsPlaying = currentlyPlaying.IsPlaying
-                };
-                _lastSyncUtc = DateTime.UtcNow;
-                return _lastTrackInfo;
-            }
-
-            if (currentlyPlaying == null)
-            {
-                _logger.LogWarning("Spotify currently-playing response was empty.");
-            }
-
-            if (_lastTrackInfo != null)
-            {
-                // If nothing is playing, return the last known track but marked as paused
-                _lastTrackInfo.IsPlaying = false;
-                return _lastTrackInfo;
-            }
+            double elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+            HomeLinkTelemetry.SpotifyRequestDurationMs.Record(elapsedMs);
+            _dashboardState.RecordSpotify(elapsedMs, isError);
+            activity?.SetTag("spotify.request.duration_ms", elapsedMs);
         }
-
-        return null;
     }
 }

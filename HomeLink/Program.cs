@@ -1,7 +1,12 @@
 namespace HomeLink;
 
+using System.Diagnostics;
 using System.Globalization;
 using Microsoft.AspNetCore.HttpLogging;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
+using HomeLink.Telemetry;
 
 public static class Program
 {
@@ -9,12 +14,67 @@ public static class Program
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
 
+        string serviceName = builder.Configuration["OpenTelemetry:ServiceName"] ?? "HomeLink.Api";
+        string serviceVersion = typeof(Program).Assembly.GetName().Version?.ToString() ?? "1.0.0";
+
+        builder.Services
+            .AddOpenTelemetry()
+            .ConfigureResource(resource => resource.AddService(serviceName: serviceName, serviceVersion: serviceVersion))
+            .WithTracing(tracing =>
+            {
+                tracing
+                    .AddSource(HomeLinkTelemetry.ActivitySourceName)
+                    .AddAspNetCoreInstrumentation(options =>
+                    {
+                        options.RecordException = true;
+                        options.Filter = context => !context.Request.Path.StartsWithSegments("/health");
+                    })
+                    .AddHttpClientInstrumentation(options =>
+                    {
+                        options.RecordException = true;
+                    });
+
+                string? otlpEndpoint = builder.Configuration["OpenTelemetry:Otlp:Endpoint"];
+                if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+                {
+                    tracing.AddOtlpExporter(options =>
+                    {
+                        options.Endpoint = new Uri(otlpEndpoint);
+                    });
+                }
+                else
+                {
+                    tracing.AddConsoleExporter();
+                }
+            })
+            .WithMetrics(metrics =>
+            {
+                metrics
+                    .AddMeter(HomeLinkTelemetry.MeterName)
+                    .AddAspNetCoreInstrumentation()
+                    .AddHttpClientInstrumentation()
+                    .AddRuntimeInstrumentation();
+
+                string? otlpEndpoint = builder.Configuration["OpenTelemetry:Otlp:Endpoint"];
+                if (!string.IsNullOrWhiteSpace(otlpEndpoint))
+                {
+                    metrics.AddOtlpExporter(options =>
+                    {
+                        options.Endpoint = new Uri(otlpEndpoint);
+                    });
+                }
+                else
+                {
+                    metrics.AddConsoleExporter();
+                }
+            });
+
         // Read only the Spotify refresh token (and optional client id).
         // Note: Spotify's token refresh may still require client_id or client_secret depending on your app type.
         // We accept that as a runtime requirement — caller can provide SPOTIFY_ID if needed.
         string? spotifyRefreshToken = Environment.GetEnvironmentVariable("SPOTIFY_REFRESH_TOKEN");
-        string? spotifyClientId = Environment.GetEnvironmentVariable("SPOTIFY_ID"); 
-        string? spotifyClientSecret = Environment.GetEnvironmentVariable("SPOTIFY_SECRET"); 
+        string? spotifyClientId = Environment.GetEnvironmentVariable("SPOTIFY_ID");
+        string? spotifyClientSecret = Environment.GetEnvironmentVariable("SPOTIFY_SECRET");
 
         DateTime? spotifyTokenExpiry = null;
         string? expiryEnv = Environment.GetEnvironmentVariable("SPOTIFY_TOKEN_EXPIRY");
@@ -30,21 +90,24 @@ public static class Program
             }
         }
 
-        builder.Services.AddSingleton<Services.SpotifyService>(sp => 
+        builder.Services.AddSingleton<TelemetryDashboardState>();
+
+        builder.Services.AddSingleton<Services.SpotifyService>(sp =>
             new Services.SpotifyService(
                 sp.GetRequiredService<ILogger<Services.SpotifyService>>(),
+                sp.GetRequiredService<TelemetryDashboardState>(),
                 spotifyClientId,
                 spotifyClientSecret,
                 spotifyRefreshToken,
                 spotifyTokenExpiry));
-        
+
         builder.Services.AddHttpClient<Services.LocationService>();
         builder.Services.AddSingleton<Services.LocationService>();
 
         builder.Services.AddHttpClient<Services.DrawingService>();
         builder.Services.AddScoped<Services.DrawingService>();
         builder.Services.AddScoped<Services.DisplayDataService>();
-        
+
         builder.Services.AddControllers();
         builder.Services.AddHealthChecks();
         // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
@@ -63,6 +126,7 @@ public static class Program
             options.RequestHeaders.Add("If-None-Match");
             options.ResponseHeaders.Add("ETag");
             options.ResponseHeaders.Add("X-Device-Battery");
+            options.ResponseHeaders.Add("X-Trace-Id");
             options.CombineLogs = true;
         });
 
@@ -72,6 +136,23 @@ public static class Program
         app.MapOpenApi();
         app.MapHealthChecks("/health");
 
+        app.MapGet("/api/telemetry/summary", (TelemetryDashboardState dashboardState) =>
+            Results.Ok(dashboardState.CreateSnapshot()));
+
+        app.MapGet("/telemetry/dashboard", () =>
+            Results.Content(TelemetryDashboardPage.Html, "text/html"));
+
+        app.Use(async (context, next) =>
+        {
+            context.Response.OnStarting(() =>
+            {
+                string traceId = Activity.Current?.TraceId.ToString() ?? context.TraceIdentifier;
+                context.Response.Headers["X-Trace-Id"] = traceId;
+                return Task.CompletedTask;
+            });
+
+            await next();
+        });
 
         app.UseHttpLogging();
 
