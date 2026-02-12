@@ -7,6 +7,7 @@ public class TelemetryDashboardState
     private static readonly TimeSpan OneHour = TimeSpan.FromHours(1);
     private static readonly TimeSpan OneDay = TimeSpan.FromDays(1);
     private const int MaxBatteryHistorySamples = 120_000;
+    private static readonly TimeSpan MinimumPredictionWindow = TimeSpan.FromHours(1);
 
     private readonly object _timelineLock = new();
     private readonly Queue<DateTimeOffset> _displayRequestTimeline = new();
@@ -108,40 +109,58 @@ public class TelemetryDashboardState
 
     private BatteryPrediction PredictBattery(int currentBatteryPercent, DateTimeOffset currentTimestampUtc)
     {
-        if (!_batteryHistory.Any(sample => sample.BatteryPercent.HasValue))
+        List<DeviceBatterySample> candidates = _batteryHistory
+            .Where(sample => sample.BatteryPercent.HasValue)
+            .ToList();
+
+        if (candidates.Count < 2)
         {
             return new BatteryPrediction(null, null);
         }
 
-        DeviceBatterySample? baseline = _batteryHistory
-            .LastOrDefault(sample => sample.BatteryPercent.HasValue && sample.BatteryPercent.Value != currentBatteryPercent);
-
-        // If all samples are flat, prediction stays flat and time-to-empty is unknown.
-        if (baseline is null)
+        DeviceBatterySample first = candidates[0];
+        double totalSpanHours = (currentTimestampUtc - first.TimestampUtc).TotalHours;
+        if (totalSpanHours < MinimumPredictionWindow.TotalHours)
         {
             return new BatteryPrediction(currentBatteryPercent, null);
         }
 
-        double elapsedHours = (currentTimestampUtc - baseline.TimestampUtc).TotalHours;
-        if (elapsedHours <= 0.01)
+        // Use linear regression over retained history so brief battery dips are smoothed out
+        // instead of becoming the sole baseline point.
+        double xSum = 0;
+        double ySum = 0;
+        double xxSum = 0;
+        double xySum = 0;
+
+        foreach (DeviceBatterySample sample in candidates)
+        {
+            double x = (sample.TimestampUtc - first.TimestampUtc).TotalHours;
+            double y = sample.BatteryPercent!.Value;
+
+            xSum += x;
+            ySum += y;
+            xxSum += x * x;
+            xySum += x * y;
+        }
+
+        double n = candidates.Count;
+        double denominator = (n * xxSum) - (xSum * xSum);
+        if (Math.Abs(denominator) < 0.000001)
         {
             return new BatteryPrediction(currentBatteryPercent, null);
         }
 
-        double deltaBattery = currentBatteryPercent - baseline.BatteryPercent!.Value;
-        double drainPerHour = deltaBattery / elapsedHours;
+        double slopePerHour = ((n * xySum) - (xSum * ySum)) / denominator;
 
-        // If charging, prediction stays flat and time-to-empty is unknown.
-        if (drainPerHour >= 0)
+        // Flat/charging trend: keep battery prediction flat and no time-to-empty.
+        if (slopePerHour >= 0)
         {
             return new BatteryPrediction(currentBatteryPercent, null);
         }
 
-        double projectedNextHour = currentBatteryPercent + drainPerHour;
+        double projectedNextHour = currentBatteryPercent + slopePerHour;
         int predictedNextHourPercent = (int)Math.Clamp(Math.Round(projectedNextHour, MidpointRounding.AwayFromZero), 0, 100);
-
-        // drainPerHour is negative here.
-        double hoursToEmpty = currentBatteryPercent / -drainPerHour;
+        double hoursToEmpty = currentBatteryPercent / -slopePerHour;
 
         return new BatteryPrediction(predictedNextHourPercent, Math.Round(hoursToEmpty, 2));
     }
