@@ -6,12 +6,18 @@ public class TelemetryDashboardState
 {
     private static readonly TimeSpan OneHour = TimeSpan.FromHours(1);
     private static readonly TimeSpan OneDay = TimeSpan.FromDays(1);
+    private static readonly TimeSpan LatencyBucketSize = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan LatencyHistoryWindow = TimeSpan.FromHours(6);
     private const int MaxBatteryHistorySamples = 120_000;
     private static readonly TimeSpan MinimumPredictionWindow = TimeSpan.FromHours(1);
 
     private readonly object _timelineLock = new();
+    private readonly object _latencyLock = new();
     private readonly Queue<DateTimeOffset> _displayRequestTimeline = new();
     private readonly Queue<DeviceBatterySample> _batteryHistory = new();
+    private readonly Queue<LatencyBucketAccumulator> _displayLatencyBuckets = new();
+    private readonly Queue<LatencyBucketAccumulator> _locationLatencyBuckets = new();
+    private readonly Queue<LatencyBucketAccumulator> _spotifyLatencyBuckets = new();
     private readonly RuntimeTelemetrySampler _runtimeTelemetrySampler;
 
     private long _displayRequests;
@@ -38,6 +44,7 @@ public class TelemetryDashboardState
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
         Record(ref _displayRequests, ref _displayErrors, ref _displayTotalDurationMs, ref _displayLastDurationMs, durationMs, isError);
+        RecordLatency(_displayLatencyBuckets, durationMs, now);
 
         lock (_timelineLock)
         {
@@ -68,11 +75,13 @@ public class TelemetryDashboardState
     public void RecordLocation(double durationMs, bool isError)
     {
         Record(ref _locationUpdates, ref _locationErrors, ref _locationTotalDurationMs, ref _locationLastDurationMs, durationMs, isError);
+        RecordLatency(_locationLatencyBuckets, durationMs, DateTimeOffset.UtcNow);
     }
 
     public void RecordSpotify(double durationMs, bool isError)
     {
         Record(ref _spotifyRequests, ref _spotifyErrors, ref _spotifyTotalDurationMs, ref _spotifyLastDurationMs, durationMs, isError);
+        RecordLatency(_spotifyLatencyBuckets, durationMs, DateTimeOffset.UtcNow);
     }
 
     public TelemetryDashboardSnapshot CreateSnapshot()
@@ -86,8 +95,28 @@ public class TelemetryDashboardState
             Location = CreateSection(_locationUpdates, _locationErrors, _locationTotalDurationMs, _locationLastDurationMs),
             Spotify = CreateSection(_spotifyRequests, _spotifyErrors, _spotifyTotalDurationMs, _spotifyLastDurationMs),
             Device = device,
-            Runtime = _runtimeTelemetrySampler.CreateSnapshot()
+            Runtime = _runtimeTelemetrySampler.CreateSnapshot(),
+            TimeSeries = CreateTimeSeriesSection()
         };
+    }
+
+    private TelemetryTimeSeriesSection CreateTimeSeriesSection()
+    {
+        lock (_latencyLock)
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            TrimOldLatencyBuckets(_displayLatencyBuckets, now);
+            TrimOldLatencyBuckets(_locationLatencyBuckets, now);
+            TrimOldLatencyBuckets(_spotifyLatencyBuckets, now);
+
+            return new TelemetryTimeSeriesSection
+            {
+                BucketSizeSeconds = (int)LatencyBucketSize.TotalSeconds,
+                DisplayLatency = _displayLatencyBuckets.Select(CreateLatencyPoint).ToList(),
+                LocationLatency = _locationLatencyBuckets.Select(CreateLatencyPoint).ToList(),
+                SpotifyLatency = _spotifyLatencyBuckets.Select(CreateLatencyPoint).ToList()
+            };
+        }
     }
 
     private DeviceTelemetrySection CreateDeviceSection()
@@ -225,6 +254,51 @@ public class TelemetryDashboardState
             Interlocked.Increment(ref errors);
         }
     }
+
+    private void RecordLatency(Queue<LatencyBucketAccumulator> buckets, double durationMs, DateTimeOffset now)
+    {
+        long roundedDuration = Math.Max(0, (long)Math.Round(durationMs, MidpointRounding.AwayFromZero));
+        DateTimeOffset bucketStart = GetBucketStart(now);
+
+        lock (_latencyLock)
+        {
+            if (buckets.Count == 0 || buckets.Last().BucketStartUtc != bucketStart)
+            {
+                buckets.Enqueue(new LatencyBucketAccumulator(bucketStart));
+            }
+
+            buckets.Last().AddSample(roundedDuration);
+            TrimOldLatencyBuckets(buckets, now);
+        }
+    }
+
+    private static DateTimeOffset GetBucketStart(DateTimeOffset timestamp)
+    {
+        long bucketTicks = LatencyBucketSize.Ticks;
+        long truncatedTicks = timestamp.UtcTicks - (timestamp.UtcTicks % bucketTicks);
+        return new DateTimeOffset(truncatedTicks, TimeSpan.Zero);
+    }
+
+    private static void TrimOldLatencyBuckets(Queue<LatencyBucketAccumulator> buckets, DateTimeOffset now)
+    {
+        DateTimeOffset threshold = now - LatencyHistoryWindow;
+
+        while (buckets.Count > 0 && buckets.Peek().BucketStartUtc < threshold)
+        {
+            buckets.Dequeue();
+        }
+    }
+
+    private static LatencyTimeSeriesPoint CreateLatencyPoint(LatencyBucketAccumulator bucket)
+    {
+        return new LatencyTimeSeriesPoint
+        {
+            TimestampUtc = bucket.BucketStartUtc,
+            AvgDurationMs = Math.Round(bucket.AverageDurationMs, 2),
+            P95DurationMs = bucket.CalculatePercentile(0.95),
+            SampleCount = bucket.SampleCount
+        };
+    }
 }
 
 public class TelemetryDashboardSnapshot
@@ -240,6 +314,64 @@ public class TelemetryDashboardSnapshot
     public DeviceTelemetrySection Device { get; set; } = new();
 
     public RuntimeTelemetrySection Runtime { get; set; } = new();
+
+    public TelemetryTimeSeriesSection TimeSeries { get; set; } = new();
+}
+
+public class TelemetryTimeSeriesSection
+{
+    public int BucketSizeSeconds { get; set; }
+
+    public List<LatencyTimeSeriesPoint> DisplayLatency { get; set; } = new();
+
+    public List<LatencyTimeSeriesPoint> LocationLatency { get; set; } = new();
+
+    public List<LatencyTimeSeriesPoint> SpotifyLatency { get; set; } = new();
+}
+
+public class LatencyTimeSeriesPoint
+{
+    public DateTimeOffset TimestampUtc { get; set; }
+
+    public int SampleCount { get; set; }
+
+    public double AvgDurationMs { get; set; }
+
+    public long P95DurationMs { get; set; }
+}
+
+public class LatencyBucketAccumulator
+{
+    private readonly List<long> _durationsMs = new();
+
+    public LatencyBucketAccumulator(DateTimeOffset bucketStartUtc)
+    {
+        BucketStartUtc = bucketStartUtc;
+    }
+
+    public DateTimeOffset BucketStartUtc { get; }
+
+    public int SampleCount => _durationsMs.Count;
+
+    public double AverageDurationMs => SampleCount == 0 ? 0 : _durationsMs.Average();
+
+    public void AddSample(long durationMs)
+    {
+        _durationsMs.Add(durationMs);
+    }
+
+    public long CalculatePercentile(double percentile)
+    {
+        if (_durationsMs.Count == 0)
+        {
+            return 0;
+        }
+
+        List<long> sorted = _durationsMs.OrderBy(value => value).ToList();
+        int rank = (int)Math.Ceiling(percentile * sorted.Count);
+        int index = Math.Clamp(rank - 1, 0, sorted.Count - 1);
+        return sorted[index];
+    }
 }
 
 public class TelemetryDashboardSection
