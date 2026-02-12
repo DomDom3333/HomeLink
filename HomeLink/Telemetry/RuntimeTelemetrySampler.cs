@@ -34,17 +34,79 @@ public class RuntimeTelemetrySampler : IHostedService, IDisposable
         return Task.CompletedTask;
     }
 
-    public RuntimeTelemetrySection CreateSnapshot()
+    public RuntimeTelemetrySection CreateSnapshot(TimeSpan? window = null, TimeSpan? resolution = null, int? maxPoints = null)
     {
         lock (_historyLock)
         {
-            List<RuntimeTelemetryPoint> history = _history.ToList();
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            DateTimeOffset threshold = now - window.GetValueOrDefault(TimeSpan.FromHours(6));
+
+            List<RuntimeTelemetryPoint> history = _history
+                .Where(point => point.TimestampUtc >= threshold)
+                .ToList();
+
+            TimeSpan resolvedResolution = resolution.GetValueOrDefault(SampleInterval);
+            if (resolvedResolution <= TimeSpan.Zero)
+            {
+                resolvedResolution = SampleInterval;
+            }
+
+            int resolvedMaxPoints = Math.Clamp(maxPoints.GetValueOrDefault(200), 25, 2000);
+
+            history = Downsample(history, resolvedResolution, resolvedMaxPoints);
             return new RuntimeTelemetrySection
             {
                 Latest = history.Count > 0 ? history[^1] : null,
                 History = history
             };
         }
+    }
+
+    private static List<RuntimeTelemetryPoint> Downsample(List<RuntimeTelemetryPoint> source, TimeSpan resolution, int maxPoints)
+    {
+        if (source.Count <= maxPoints)
+        {
+            return source;
+        }
+
+        long resolutionTicks = Math.Max(TimeSpan.FromSeconds(1).Ticks, resolution.Ticks);
+        List<RuntimeTelemetryPoint> bucketed = new();
+        List<RuntimeTelemetryPoint> bucket = new();
+        long? currentBucketKey = null;
+
+        foreach (RuntimeTelemetryPoint point in source)
+        {
+            long bucketKey = point.TimestampUtc.UtcTicks / resolutionTicks;
+            if (currentBucketKey.HasValue && currentBucketKey.Value != bucketKey)
+            {
+                bucketed.Add(bucket[^1]);
+                bucket = new List<RuntimeTelemetryPoint>();
+            }
+
+            currentBucketKey = bucketKey;
+            bucket.Add(point);
+        }
+
+        if (bucket.Count > 0)
+        {
+            bucketed.Add(bucket[^1]);
+        }
+
+        if (bucketed.Count <= maxPoints)
+        {
+            return bucketed;
+        }
+
+        List<RuntimeTelemetryPoint> reduced = new();
+        double step = (bucketed.Count - 1d) / (maxPoints - 1d);
+        for (int i = 0; i < maxPoints; i++)
+        {
+            int index = (int)Math.Round(i * step, MidpointRounding.AwayFromZero);
+            index = Math.Clamp(index, 0, bucketed.Count - 1);
+            reduced.Add(bucketed[index]);
+        }
+
+        return reduced;
     }
 
     public void Dispose()

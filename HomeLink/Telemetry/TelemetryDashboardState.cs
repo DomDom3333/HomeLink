@@ -86,10 +86,14 @@ public class TelemetryDashboardState
         RecordLatency(_spotifyLatencyBuckets, durationMs, DateTimeOffset.UtcNow);
     }
 
-    public TelemetryDashboardSnapshot CreateSnapshot()
+    public TelemetryDashboardSnapshot CreateSnapshot(TelemetrySummaryOptions? options = null)
     {
-        DeviceTelemetrySection device = CreateDeviceSection();
-        RuntimeTelemetrySection runtime = _runtimeTelemetrySampler.CreateSnapshot();
+        TelemetrySummaryOptions resolvedOptions = options ?? TelemetrySummaryOptions.Default;
+        DeviceTelemetrySection device = CreateDeviceSection(resolvedOptions);
+        RuntimeTelemetrySection runtime = _runtimeTelemetrySampler.CreateSnapshot(
+            resolvedOptions.Window,
+            resolvedOptions.Resolution,
+            resolvedOptions.MaxPoints);
         TelemetryCorrelationResult correlation15m = CalculateCpuToDisplayLatencyCorrelation(runtime.History, CorrelationWindow15m);
         TelemetryCorrelationResult correlation1h = CalculateCpuToDisplayLatencyCorrelation(runtime.History, CorrelationWindow1h);
 
@@ -101,7 +105,7 @@ public class TelemetryDashboardState
             Spotify = CreateSection(_spotifyRequests, _spotifyErrors, _spotifyTotalDurationMs, _spotifyLastDurationMs),
             Device = device,
             Runtime = runtime,
-            TimeSeries = CreateTimeSeriesSection(),
+            TimeSeries = CreateTimeSeriesSection(resolvedOptions),
             CpuToDisplayLatencyCorrelation15m = correlation15m,
             CpuToDisplayLatencyCorrelation1h = correlation1h
         };
@@ -171,7 +175,7 @@ public class TelemetryDashboardState
         };
     }
 
-    private TelemetryTimeSeriesSection CreateTimeSeriesSection()
+    private TelemetryTimeSeriesSection CreateTimeSeriesSection(TelemetrySummaryOptions options)
     {
         lock (_latencyLock)
         {
@@ -180,17 +184,20 @@ public class TelemetryDashboardState
             TrimOldLatencyBuckets(_locationLatencyBuckets, now);
             TrimOldLatencyBuckets(_spotifyLatencyBuckets, now);
 
+            DateTimeOffset threshold = now - options.Window;
+            TimeSpan resolution = options.Resolution;
+
             return new TelemetryTimeSeriesSection
             {
-                BucketSizeSeconds = (int)LatencyBucketSize.TotalSeconds,
-                DisplayLatency = _displayLatencyBuckets.Select(CreateLatencyPoint).ToList(),
-                LocationLatency = _locationLatencyBuckets.Select(CreateLatencyPoint).ToList(),
-                SpotifyLatency = _spotifyLatencyBuckets.Select(CreateLatencyPoint).ToList()
+                BucketSizeSeconds = (int)resolution.TotalSeconds,
+                DisplayLatency = DownsampleLatencyBuckets(_displayLatencyBuckets, threshold, resolution, options.MaxPoints),
+                LocationLatency = DownsampleLatencyBuckets(_locationLatencyBuckets, threshold, resolution, options.MaxPoints),
+                SpotifyLatency = DownsampleLatencyBuckets(_spotifyLatencyBuckets, threshold, resolution, options.MaxPoints)
             };
         }
     }
 
-    private DeviceTelemetrySection CreateDeviceSection()
+    private DeviceTelemetrySection CreateDeviceSection(TelemetrySummaryOptions options)
     {
         lock (_timelineLock)
         {
@@ -198,7 +205,13 @@ public class TelemetryDashboardState
             TrimOldEntries(now);
 
             DeviceBatterySample? latest = _batteryHistory.Count > 0 ? _batteryHistory.Last() : null;
-            List<DeviceBatterySample> history = _batteryHistory.ToList();
+            DateTimeOffset threshold = now - options.Window;
+            List<DeviceBatterySample> history = DownsampleSeries(
+                _batteryHistory.Where(sample => sample.TimestampUtc >= threshold),
+                sample => sample.TimestampUtc,
+                options.Resolution,
+                options.MaxPoints,
+                samplesInBucket => samplesInBucket[^1]);
 
             return new DeviceTelemetrySection
             {
@@ -212,6 +225,105 @@ public class TelemetryDashboardState
                 AvgRequestsPerDay = Math.Round(CalculateRate(_displayRequestTimeline, now, OneDay), 2)
             };
         }
+    }
+
+    private static List<LatencyTimeSeriesPoint> DownsampleLatencyBuckets(
+        IEnumerable<LatencyBucketAccumulator> source,
+        DateTimeOffset threshold,
+        TimeSpan resolution,
+        int maxPoints)
+    {
+        List<LatencyBucketAccumulator> filtered = source
+            .Where(bucket => bucket.BucketStartUtc >= threshold && bucket.SampleCount > 0)
+            .ToList();
+
+        return DownsampleSeries(
+            filtered,
+            bucket => bucket.BucketStartUtc,
+            resolution,
+            maxPoints,
+            AggregateLatencyBuckets)
+            .Select(CreateLatencyPoint)
+            .ToList();
+    }
+
+    private static LatencyBucketAccumulator AggregateLatencyBuckets(List<LatencyBucketAccumulator> buckets)
+    {
+        DateTimeOffset bucketStart = buckets[0].BucketStartUtc;
+        LatencyBucketAccumulator aggregate = new(bucketStart);
+
+        foreach (LatencyBucketAccumulator bucket in buckets)
+        {
+            foreach (long duration in bucket.GetDurations())
+            {
+                aggregate.AddSample(duration);
+            }
+        }
+
+        return aggregate;
+    }
+
+    private static List<T> DownsampleSeries<T>(
+        IEnumerable<T> source,
+        Func<T, DateTimeOffset> timestampSelector,
+        TimeSpan resolution,
+        int maxPoints,
+        Func<List<T>, T> aggregateBucket)
+    {
+        List<T> ordered = source.OrderBy(timestampSelector).ToList();
+        if (ordered.Count <= maxPoints)
+        {
+            return ordered;
+        }
+
+        long resolutionTicks = Math.Max(TimeSpan.FromSeconds(1).Ticks, resolution.Ticks);
+        List<T> result = new();
+        List<T> currentBucket = new();
+        long? currentBucketKey = null;
+
+        foreach (T sample in ordered)
+        {
+            DateTimeOffset timestamp = timestampSelector(sample);
+            long bucketKey = timestamp.UtcTicks / resolutionTicks;
+
+            if (currentBucketKey.HasValue && currentBucketKey.Value != bucketKey)
+            {
+                result.Add(aggregateBucket(currentBucket));
+                currentBucket = new List<T>();
+            }
+
+            currentBucketKey = bucketKey;
+            currentBucket.Add(sample);
+        }
+
+        if (currentBucket.Count > 0)
+        {
+            result.Add(aggregateBucket(currentBucket));
+        }
+
+        return result.Count <= maxPoints
+            ? result
+            : UniformReduce(result, maxPoints);
+    }
+
+    private static List<T> UniformReduce<T>(List<T> source, int maxPoints)
+    {
+        if (source.Count <= maxPoints)
+        {
+            return source;
+        }
+
+        List<T> reduced = new();
+        double step = (source.Count - 1d) / (maxPoints - 1d);
+
+        for (int i = 0; i < maxPoints; i++)
+        {
+            int index = (int)Math.Round(i * step, MidpointRounding.AwayFromZero);
+            index = Math.Clamp(index, 0, source.Count - 1);
+            reduced.Add(source[index]);
+        }
+
+        return reduced;
     }
 
     private BatteryPrediction PredictBattery(int currentBatteryPercent, DateTimeOffset currentTimestampUtc)
@@ -558,6 +670,11 @@ public class LatencyBucketAccumulator
         _durationsMs.Add(durationMs);
     }
 
+    public IReadOnlyList<long> GetDurations()
+    {
+        return _durationsMs;
+    }
+
     public long CalculatePercentile(double percentile)
     {
         if (_durationsMs.Count == 0)
@@ -569,6 +686,40 @@ public class LatencyBucketAccumulator
         int rank = (int)Math.Ceiling(percentile * sorted.Count);
         int index = Math.Clamp(rank - 1, 0, sorted.Count - 1);
         return sorted[index];
+    }
+}
+
+public record TelemetrySummaryOptions(TimeSpan Window, TimeSpan Resolution, int MaxPoints)
+{
+    private const int DefaultMaxChartPoints = 200;
+
+    public static TelemetrySummaryOptions Default { get; } = Create(null, null, null);
+
+    public static TelemetrySummaryOptions Create(TimeSpan? window, TimeSpan? resolution, int? maxPoints)
+    {
+        TimeSpan resolvedWindow = window.GetValueOrDefault(TimeSpan.FromHours(6));
+        if (resolvedWindow <= TimeSpan.Zero)
+        {
+            resolvedWindow = TimeSpan.FromHours(6);
+        }
+
+        int resolvedMaxPoints = Math.Clamp(maxPoints.GetValueOrDefault(DefaultMaxChartPoints), 25, 2000);
+
+        TimeSpan minResolution = TimeSpan.FromSeconds(1);
+        TimeSpan computedResolution = TimeSpan.FromTicks(Math.Max(
+            minResolution.Ticks,
+            (long)Math.Ceiling(resolvedWindow.Ticks / (double)resolvedMaxPoints)));
+
+        TimeSpan resolvedResolution = resolution.HasValue && resolution.Value > TimeSpan.Zero
+            ? resolution.Value
+            : computedResolution;
+
+        if (resolvedResolution < minResolution)
+        {
+            resolvedResolution = minResolution;
+        }
+
+        return new TelemetrySummaryOptions(resolvedWindow, resolvedResolution, resolvedMaxPoints);
     }
 }
 

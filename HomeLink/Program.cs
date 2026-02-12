@@ -2,6 +2,7 @@ namespace HomeLink;
 
 using System.Diagnostics;
 using System.Globalization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpLogging;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -140,8 +141,15 @@ public static class Program
         app.MapOpenApi();
         app.MapHealthChecks("/health");
 
-        app.MapGet("/api/telemetry/summary", (TelemetryDashboardState dashboardState) =>
-            Results.Ok(dashboardState.CreateSnapshot()));
+        app.MapGet("/api/telemetry/summary", (HttpRequest request, TelemetryDashboardState dashboardState) =>
+        {
+            TimeSpan? window = ParseDuration(request.Query["window"]);
+            TimeSpan? resolution = ParseDuration(request.Query["resolution"]);
+            int? maxPoints = ParseInt(request.Query["maxPoints"]);
+
+            TelemetrySummaryOptions options = TelemetrySummaryOptions.Create(window, resolution, maxPoints);
+            return Results.Ok(dashboardState.CreateSnapshot(options));
+        });
 
         app.MapGet("/telemetry/dashboard", () =>
             Results.Content(TelemetryDashboardPage.Html, "text/html"));
@@ -163,5 +171,58 @@ public static class Program
         app.MapControllers();
 
         app.Run();
+    }
+
+    private static TimeSpan? ParseDuration(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return null;
+        }
+
+        string value = input.Trim().ToLowerInvariant();
+        double scalar;
+
+        if (value.EndsWith("ms") && double.TryParse(value[..^2], NumberStyles.Float, CultureInfo.InvariantCulture, out scalar))
+        {
+            return TimeSpan.FromMilliseconds(scalar);
+        }
+
+        if (value.EndsWith('s') && double.TryParse(value[..^1], NumberStyles.Float, CultureInfo.InvariantCulture, out scalar))
+        {
+            return TimeSpan.FromSeconds(scalar);
+        }
+
+        if (value.EndsWith('m') && double.TryParse(value[..^1], NumberStyles.Float, CultureInfo.InvariantCulture, out scalar))
+        {
+            return TimeSpan.FromMinutes(scalar);
+        }
+
+        if (value.EndsWith('h') && double.TryParse(value[..^1], NumberStyles.Float, CultureInfo.InvariantCulture, out scalar))
+        {
+            return TimeSpan.FromHours(scalar);
+        }
+
+        if (value.EndsWith('d') && double.TryParse(value[..^1], NumberStyles.Float, CultureInfo.InvariantCulture, out scalar))
+        {
+            return TimeSpan.FromDays(scalar);
+        }
+
+        if (TimeSpan.TryParse(input, CultureInfo.InvariantCulture, out TimeSpan timespan))
+        {
+            return timespan;
+        }
+
+        return null;
+    }
+
+    private static int? ParseInt(string? input)
+    {
+        if (int.TryParse(input, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsed))
+        {
+            return parsed;
+        }
+
+        return null;
     }
 }
