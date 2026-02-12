@@ -90,6 +90,8 @@ public static class Program
             }
         }
 
+        builder.Services.AddSingleton<RuntimeTelemetrySampler>();
+        builder.Services.AddHostedService(sp => sp.GetRequiredService<RuntimeTelemetrySampler>());
         builder.Services.AddSingleton<TelemetryDashboardState>();
         builder.Services.AddSingleton<Services.StatePersistenceService>();
 
