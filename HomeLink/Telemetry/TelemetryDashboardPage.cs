@@ -17,17 +17,19 @@ public static class TelemetryDashboardPage
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; }
     .card { background: #1e293b; border-radius: 12px; padding: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.25); }
     .title { margin: 0 0 12px; font-size: 1.05rem; }
-    .metric { display: flex; justify-content: space-between; margin: 8px 0; color: #cbd5e1; }
-    .value { color: #f8fafc; font-weight: 600; }
+    .metric { display: flex; justify-content: space-between; margin: 8px 0; color: #cbd5e1; gap: 8px; }
+    .value { color: #f8fafc; font-weight: 600; text-align: right; }
     .footer { margin-top: 16px; color: #94a3b8; font-size: .9rem; }
     .ok { color: #4ade80; }
     .bad { color: #f87171; }
+    .history { margin-top: 10px; max-height: 180px; overflow-y: auto; border-top: 1px solid rgba(148, 163, 184, 0.25); padding-top: 8px; }
+    .history-row { display: flex; justify-content: space-between; font-size: .85rem; color: #cbd5e1; margin: 4px 0; }
   </style>
 </head>
 <body>
   <div class="wrap">
     <h1>HomeLink Telemetry Dashboard</h1>
-    <p>Live app metrics from in-process counters (refreshes every 2s). For full telemetry pipelines, configure the OTLP exporter and inspect data in your collector/backend.</p>
+    <p>Live app metrics from in-process counters (refreshes every 2s). Includes request-rate windows and latest device battery telemetry from /api/display/render calls.</p>
     <div class="grid">
       <div class="card" id="display-card">
         <h2 class="title">Display Render</h2>
@@ -55,6 +57,18 @@ public static class TelemetryDashboardPage
         <div class="metric"><span>Last duration</span><span class="value" id="spotify-last">0 ms</span></div>
         <div class="metric"><span>Avg duration</span><span class="value" id="spotify-avg">0 ms</span></div>
       </div>
+
+      <div class="card" id="device-card">
+        <h2 class="title">Client Device</h2>
+        <div class="metric"><span>Latest battery</span><span class="value" id="device-battery">n/a</span></div>
+        <div class="metric"><span>Predicted battery (1h)</span><span class="value" id="device-battery-prediction">n/a</span></div>
+        <div class="metric"><span>Time until empty</span><span class="value" id="device-time-to-empty">n/a</span></div>
+        <div class="metric"><span>Req last hour</span><span class="value" id="device-last-hour">0</span></div>
+        <div class="metric"><span>Req last day</span><span class="value" id="device-last-day">0</span></div>
+        <div class="metric"><span>Avg req / hour (1d)</span><span class="value" id="device-avg-hour">0</span></div>
+        <div class="metric"><span>Avg req / day (1d)</span><span class="value" id="device-avg-day">0</span></div>
+        <div class="history" id="device-history"></div>
+      </div>
     </div>
     <div class="footer">Last updated: <span id="updated">never</span></div>
   </div>
@@ -71,6 +85,47 @@ public static class TelemetryDashboardPage
       rateElement.classList.add(data.errorRate < 5 ? 'ok' : 'bad');
     }
 
+    function formatPercent(value) {
+      return value === null || value === undefined ? 'n/a' : `${value}%`;
+    }
+
+    function formatHours(value) {
+      if (value === null || value === undefined) return 'n/a';
+      if (value >= 24) return `${(value / 24).toFixed(1)} d`;
+      return `${value.toFixed(1)} h`;
+    }
+
+    function setDevice(data) {
+      document.getElementById('device-battery').textContent = formatPercent(data.latestBatteryPercent);
+      document.getElementById('device-battery-prediction').textContent = formatPercent(data.latestPredictedBatteryPercent);
+      document.getElementById('device-time-to-empty').textContent = formatHours(data.latestPredictedHoursToEmpty);
+      document.getElementById('device-last-hour').textContent = data.requestsLastHour;
+      document.getElementById('device-last-day').textContent = data.requestsLastDay;
+      document.getElementById('device-avg-hour').textContent = data.avgRequestsPerHour;
+      document.getElementById('device-avg-day').textContent = data.avgRequestsPerDay;
+
+      const history = document.getElementById('device-history');
+      history.innerHTML = '';
+      const rows = (data.batteryHistory ?? []).slice(-12).reverse();
+
+      if (rows.length === 0) {
+        history.textContent = 'No battery samples yet.';
+        return;
+      }
+
+      for (const entry of rows) {
+        const row = document.createElement('div');
+        row.className = 'history-row';
+        const left = document.createElement('span');
+        left.textContent = new Date(entry.timestampUtc).toLocaleTimeString();
+        const right = document.createElement('span');
+        right.textContent = `${formatPercent(entry.batteryPercent)} → ${formatPercent(entry.predictedBatteryPercent)} (${formatHours(entry.predictedHoursToEmpty)})`;
+        row.appendChild(left);
+        row.appendChild(right);
+        history.appendChild(row);
+      }
+    }
+
     async function refresh() {
       try {
         const response = await fetch('/api/telemetry/summary', { cache: 'no-store' });
@@ -79,6 +134,7 @@ public static class TelemetryDashboardPage
         setSection('display', payload.display);
         setSection('location', payload.location);
         setSection('spotify', payload.spotify);
+        setDevice(payload.device);
         document.getElementById('updated').textContent = new Date(payload.generatedAtUtc).toLocaleTimeString();
       } catch (error) {
         document.getElementById('updated').textContent = `refresh failed (${error.message})`;

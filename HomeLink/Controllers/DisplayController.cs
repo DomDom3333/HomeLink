@@ -119,7 +119,7 @@ public class DisplayController : ControllerBase
         {
             double elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
             HomeLinkTelemetry.DisplayRenderDurationMs.Record(elapsedMs);
-            _dashboardState.RecordDisplay(elapsedMs, isError);
+            _dashboardState.RecordDisplay(elapsedMs, isError, deviceBattery);
             activity?.SetTag("display.duration_ms", elapsedMs);
         }
     }
