@@ -12,6 +12,7 @@ public class TelemetryDashboardState
     private readonly object _timelineLock = new();
     private readonly Queue<DateTimeOffset> _displayRequestTimeline = new();
     private readonly Queue<DeviceBatterySample> _batteryHistory = new();
+    private readonly RuntimeTelemetrySampler _runtimeTelemetrySampler;
 
     private long _displayRequests;
     private long _displayErrors;
@@ -27,6 +28,11 @@ public class TelemetryDashboardState
     private long _spotifyErrors;
     private long _spotifyTotalDurationMs;
     private long _spotifyLastDurationMs;
+
+    public TelemetryDashboardState(RuntimeTelemetrySampler runtimeTelemetrySampler)
+    {
+        _runtimeTelemetrySampler = runtimeTelemetrySampler;
+    }
 
     public void RecordDisplay(double durationMs, bool isError, int? deviceBattery = null)
     {
@@ -79,7 +85,8 @@ public class TelemetryDashboardState
             Display = CreateSection(_displayRequests, _displayErrors, _displayTotalDurationMs, _displayLastDurationMs),
             Location = CreateSection(_locationUpdates, _locationErrors, _locationTotalDurationMs, _locationLastDurationMs),
             Spotify = CreateSection(_spotifyRequests, _spotifyErrors, _spotifyTotalDurationMs, _spotifyLastDurationMs),
-            Device = device
+            Device = device,
+            Runtime = _runtimeTelemetrySampler.CreateSnapshot()
         };
     }
 
@@ -231,6 +238,8 @@ public class TelemetryDashboardSnapshot
     public TelemetryDashboardSection Spotify { get; set; } = new();
 
     public DeviceTelemetrySection Device { get; set; } = new();
+
+    public RuntimeTelemetrySection Runtime { get; set; } = new();
 }
 
 public class TelemetryDashboardSection
@@ -277,3 +286,29 @@ public class DeviceBatterySample
 }
 
 public record BatteryPrediction(int? NextHourBatteryPercent, double? HoursToEmpty);
+
+public class RuntimeTelemetrySection
+{
+    public RuntimeTelemetryPoint? Latest { get; set; }
+
+    public List<RuntimeTelemetryPoint> History { get; set; } = new();
+}
+
+public class RuntimeTelemetryPoint
+{
+    public DateTimeOffset TimestampUtc { get; set; }
+
+    public double ProcessCpuPercent { get; set; }
+
+    public double WorkingSetMb { get; set; }
+
+    public double GcHeapMb { get; set; }
+
+    public int ThreadCount { get; set; }
+
+    public int Gen0Collections { get; set; }
+
+    public int Gen1Collections { get; set; }
+
+    public int Gen2Collections { get; set; }
+}

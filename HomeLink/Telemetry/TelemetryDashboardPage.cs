@@ -58,6 +58,17 @@ public static class TelemetryDashboardPage
         <div class="metric"><span>Avg duration</span><span class="value" id="spotify-avg">0 ms</span></div>
       </div>
 
+
+      <div class="card" id="runtime-card">
+        <h2 class="title">Server Runtime</h2>
+        <div class="metric"><span>Process CPU</span><span class="value" id="runtime-cpu">0%</span></div>
+        <div class="metric"><span>Working set</span><span class="value" id="runtime-working-set">0 MB</span></div>
+        <div class="metric"><span>GC heap</span><span class="value" id="runtime-gc-heap">0 MB</span></div>
+        <div class="metric"><span>Thread count</span><span class="value" id="runtime-threads">0</span></div>
+        <div class="metric"><span>GC collections (0/1/2)</span><span class="value" id="runtime-gc-collections">0 / 0 / 0</span></div>
+        <div class="history" id="runtime-history"></div>
+      </div>
+
       <div class="card" id="device-card">
         <h2 class="title">Client Device</h2>
         <div class="metric"><span>Latest battery</span><span class="value" id="device-battery">n/a</span></div>
@@ -93,6 +104,43 @@ public static class TelemetryDashboardPage
       if (value === null || value === undefined) return 'n/a';
       if (value >= 24) return `${(value / 24).toFixed(1)} d`;
       return `${value.toFixed(1)} h`;
+    }
+
+
+    function formatMb(value) {
+      return value === null || value === undefined ? 'n/a' : `${value} MB`;
+    }
+
+    function setRuntime(data) {
+      const latest = data?.latest;
+      document.getElementById('runtime-cpu').textContent = latest ? `${latest.processCpuPercent}%` : 'n/a';
+      document.getElementById('runtime-working-set').textContent = latest ? formatMb(latest.workingSetMb) : 'n/a';
+      document.getElementById('runtime-gc-heap').textContent = latest ? formatMb(latest.gcHeapMb) : 'n/a';
+      document.getElementById('runtime-threads').textContent = latest ? latest.threadCount : 'n/a';
+      document.getElementById('runtime-gc-collections').textContent = latest
+        ? `${latest.gen0Collections} / ${latest.gen1Collections} / ${latest.gen2Collections}`
+        : 'n/a';
+
+      const history = document.getElementById('runtime-history');
+      history.innerHTML = '';
+      const rows = (data?.history ?? []).slice(-12).reverse();
+
+      if (rows.length === 0) {
+        history.textContent = 'No runtime samples yet.';
+        return;
+      }
+
+      for (const entry of rows) {
+        const row = document.createElement('div');
+        row.className = 'history-row';
+        const left = document.createElement('span');
+        left.textContent = new Date(entry.timestampUtc).toLocaleTimeString();
+        const right = document.createElement('span');
+        right.textContent = `${entry.processCpuPercent}% · ${entry.workingSetMb} MB · GC ${entry.gen0Collections}/${entry.gen1Collections}/${entry.gen2Collections}`;
+        row.appendChild(left);
+        row.appendChild(right);
+        history.appendChild(row);
+      }
     }
 
     function setDevice(data) {
@@ -134,6 +182,7 @@ public static class TelemetryDashboardPage
         setSection('display', payload.display);
         setSection('location', payload.location);
         setSection('spotify', payload.spotify);
+        setRuntime(payload.runtime);
         setDevice(payload.device);
         document.getElementById('updated').textContent = new Date(payload.generatedAtUtc).toLocaleTimeString();
       } catch (error) {
