@@ -4,6 +4,8 @@ using System.Threading;
 
 public class TelemetryDashboardState
 {
+    private static readonly TimeSpan CorrelationWindow15m = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan CorrelationWindow1h = TimeSpan.FromHours(1);
     private static readonly TimeSpan OneHour = TimeSpan.FromHours(1);
     private static readonly TimeSpan OneDay = TimeSpan.FromDays(1);
     private static readonly TimeSpan LatencyBucketSize = TimeSpan.FromSeconds(30);
@@ -87,6 +89,9 @@ public class TelemetryDashboardState
     public TelemetryDashboardSnapshot CreateSnapshot()
     {
         DeviceTelemetrySection device = CreateDeviceSection();
+        RuntimeTelemetrySection runtime = _runtimeTelemetrySampler.CreateSnapshot();
+        TelemetryCorrelationResult correlation15m = CalculateCpuToDisplayLatencyCorrelation(runtime.History, CorrelationWindow15m);
+        TelemetryCorrelationResult correlation1h = CalculateCpuToDisplayLatencyCorrelation(runtime.History, CorrelationWindow1h);
 
         return new TelemetryDashboardSnapshot
         {
@@ -95,8 +100,74 @@ public class TelemetryDashboardState
             Location = CreateSection(_locationUpdates, _locationErrors, _locationTotalDurationMs, _locationLastDurationMs),
             Spotify = CreateSection(_spotifyRequests, _spotifyErrors, _spotifyTotalDurationMs, _spotifyLastDurationMs),
             Device = device,
-            Runtime = _runtimeTelemetrySampler.CreateSnapshot(),
-            TimeSeries = CreateTimeSeriesSection()
+            Runtime = runtime,
+            TimeSeries = CreateTimeSeriesSection(),
+            CpuToDisplayLatencyCorrelation15m = correlation15m,
+            CpuToDisplayLatencyCorrelation1h = correlation1h
+        };
+    }
+
+    private TelemetryCorrelationResult CalculateCpuToDisplayLatencyCorrelation(
+        IReadOnlyList<RuntimeTelemetryPoint> runtimeHistory,
+        TimeSpan window)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset threshold = now - window;
+        List<RuntimeTelemetryPoint> recentCpu = runtimeHistory
+            .Where(point => point.TimestampUtc >= threshold)
+            .ToList();
+
+        if (recentCpu.Count == 0)
+        {
+            return TelemetryCorrelationResult.Empty(window);
+        }
+
+        List<LatencyBucketAccumulator> latencyBuckets;
+        lock (_latencyLock)
+        {
+            TrimOldLatencyBuckets(_displayLatencyBuckets, now);
+            latencyBuckets = _displayLatencyBuckets
+                .Where(bucket => bucket.BucketStartUtc >= threshold && bucket.SampleCount > 0)
+                .ToList();
+        }
+
+        if (latencyBuckets.Count == 0)
+        {
+            return TelemetryCorrelationResult.Empty(window);
+        }
+
+        List<double> cpuSamples = new();
+        List<double> latencySamples = new();
+
+        foreach (LatencyBucketAccumulator bucket in latencyBuckets)
+        {
+            DateTimeOffset bucketEnd = bucket.BucketStartUtc + LatencyBucketSize;
+            List<RuntimeTelemetryPoint> bucketCpu = recentCpu
+                .Where(point => point.TimestampUtc >= bucket.BucketStartUtc && point.TimestampUtc < bucketEnd)
+                .ToList();
+
+            if (bucketCpu.Count == 0)
+            {
+                continue;
+            }
+
+            cpuSamples.Add(bucketCpu.Average(point => point.ProcessCpuPercent));
+            latencySamples.Add(bucket.AverageDurationMs);
+        }
+
+        int sampleSize = cpuSamples.Count;
+        if (sampleSize < 3)
+        {
+            return TelemetryCorrelationResult.Empty(window, sampleSize);
+        }
+
+        return new TelemetryCorrelationResult
+        {
+            WindowSeconds = (int)window.TotalSeconds,
+            SampleSize = sampleSize,
+            Pearson = Math.Round(TelemetryCorrelationCalculator.Pearson(cpuSamples, latencySamples), 3),
+            Spearman = Math.Round(TelemetryCorrelationCalculator.Spearman(cpuSamples, latencySamples), 3),
+            Confidence = TelemetryCorrelationCalculator.GetConfidence(sampleSize)
         };
     }
 
@@ -316,6 +387,133 @@ public class TelemetryDashboardSnapshot
     public RuntimeTelemetrySection Runtime { get; set; } = new();
 
     public TelemetryTimeSeriesSection TimeSeries { get; set; } = new();
+
+    public TelemetryCorrelationResult CpuToDisplayLatencyCorrelation15m { get; set; } = TelemetryCorrelationResult.Empty(CorrelationWindowSeconds15m);
+
+    public TelemetryCorrelationResult CpuToDisplayLatencyCorrelation1h { get; set; } = TelemetryCorrelationResult.Empty(CorrelationWindowSeconds1h);
+
+    private const int CorrelationWindowSeconds15m = 900;
+
+    private const int CorrelationWindowSeconds1h = 3600;
+}
+
+public class TelemetryCorrelationResult
+{
+    public int WindowSeconds { get; set; }
+
+    public int SampleSize { get; set; }
+
+    public double? Pearson { get; set; }
+
+    public double? Spearman { get; set; }
+
+    public string Confidence { get; set; } = "insufficient";
+
+    public static TelemetryCorrelationResult Empty(TimeSpan window, int sampleSize = 0)
+    {
+        return new TelemetryCorrelationResult
+        {
+            WindowSeconds = (int)window.TotalSeconds,
+            SampleSize = sampleSize,
+            Confidence = TelemetryCorrelationCalculator.GetConfidence(sampleSize)
+        };
+    }
+
+    public static TelemetryCorrelationResult Empty(int windowSeconds, int sampleSize = 0)
+    {
+        return new TelemetryCorrelationResult
+        {
+            WindowSeconds = windowSeconds,
+            SampleSize = sampleSize,
+            Confidence = TelemetryCorrelationCalculator.GetConfidence(sampleSize)
+        };
+    }
+}
+
+public static class TelemetryCorrelationCalculator
+{
+    public static double Pearson(IReadOnlyList<double> x, IReadOnlyList<double> y)
+    {
+        if (x.Count != y.Count || x.Count < 2)
+        {
+            return 0;
+        }
+
+        double meanX = x.Average();
+        double meanY = y.Average();
+        double numerator = 0;
+        double sumSquaresX = 0;
+        double sumSquaresY = 0;
+
+        for (int i = 0; i < x.Count; i++)
+        {
+            double dx = x[i] - meanX;
+            double dy = y[i] - meanY;
+            numerator += dx * dy;
+            sumSquaresX += dx * dx;
+            sumSquaresY += dy * dy;
+        }
+
+        double denominator = Math.Sqrt(sumSquaresX * sumSquaresY);
+        if (denominator < 0.000001)
+        {
+            return 0;
+        }
+
+        return numerator / denominator;
+    }
+
+    public static double Spearman(IReadOnlyList<double> x, IReadOnlyList<double> y)
+    {
+        if (x.Count != y.Count || x.Count < 2)
+        {
+            return 0;
+        }
+
+        List<double> rankX = Rank(x);
+        List<double> rankY = Rank(y);
+        return Pearson(rankX, rankY);
+    }
+
+    public static string GetConfidence(int sampleSize)
+    {
+        return sampleSize switch
+        {
+            >= 25 => "high",
+            >= 12 => "medium",
+            >= 6 => "low",
+            _ => "insufficient"
+        };
+    }
+
+    private static List<double> Rank(IReadOnlyList<double> values)
+    {
+        List<(double Value, int Index)> ordered = values
+            .Select((value, index) => (Value: value, Index: index))
+            .OrderBy(item => item.Value)
+            .ToList();
+
+        double[] ranks = new double[values.Count];
+        int i = 0;
+        while (i < ordered.Count)
+        {
+            int j = i;
+            while (j + 1 < ordered.Count && Math.Abs(ordered[j + 1].Value - ordered[i].Value) < 0.000001)
+            {
+                j++;
+            }
+
+            double averageRank = ((i + 1) + (j + 1)) / 2.0;
+            for (int k = i; k <= j; k++)
+            {
+                ranks[ordered[k].Index] = averageRank;
+            }
+
+            i = j + 1;
+        }
+
+        return ranks.ToList();
+    }
 }
 
 public class TelemetryTimeSeriesSection

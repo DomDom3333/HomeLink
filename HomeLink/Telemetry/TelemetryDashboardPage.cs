@@ -24,6 +24,7 @@ public static class TelemetryDashboardPage
     .bad { color: #f87171; }
     .history { margin-top: 10px; max-height: 180px; overflow-y: auto; border-top: 1px solid rgba(148, 163, 184, 0.25); padding-top: 8px; }
     .history-row { display: flex; justify-content: space-between; font-size: .85rem; color: #cbd5e1; margin: 4px 0; }
+    .hint { font-size: .75rem; color: #94a3b8; margin-top: 6px; line-height: 1.3; }
   </style>
 </head>
 <body>
@@ -67,6 +68,19 @@ public static class TelemetryDashboardPage
         <div class="metric"><span>Thread count</span><span class="value" id="runtime-threads">0</span></div>
         <div class="metric"><span>GC collections (0/1/2)</span><span class="value" id="runtime-gc-collections">0 / 0 / 0</span></div>
         <div class="history" id="runtime-history"></div>
+      </div>
+
+      <div class="card" id="correlation-card">
+        <h2 class="title">CPU ↔ Display Latency Correlation</h2>
+        <div class="metric"><span title="Pearson captures linear relationship from -1 to +1. Positive means higher CPU tends to coincide with higher display latency.">15m Pearson</span><span class="value" id="corr-15m-pearson">n/a</span></div>
+        <div class="metric"><span title="Spearman captures monotonic rank relationship and is less sensitive to outliers.">15m Spearman</span><span class="value" id="corr-15m-spearman">n/a</span></div>
+        <div class="metric"><span>15m Strength</span><span class="value" id="corr-15m-strength">n/a</span></div>
+        <div class="metric"><span>15m Confidence</span><span class="value" id="corr-15m-confidence">insufficient</span></div>
+        <div class="metric"><span title="Pearson captures linear relationship from -1 to +1. Positive means higher CPU tends to coincide with higher display latency.">1h Pearson</span><span class="value" id="corr-1h-pearson">n/a</span></div>
+        <div class="metric"><span title="Spearman captures monotonic rank relationship and is less sensitive to outliers.">1h Spearman</span><span class="value" id="corr-1h-spearman">n/a</span></div>
+        <div class="metric"><span>1h Strength</span><span class="value" id="corr-1h-strength">n/a</span></div>
+        <div class="metric"><span>1h Confidence</span><span class="value" id="corr-1h-confidence">insufficient</span></div>
+        <div class="hint" title="|r| under 0.3 is usually weak, 0.3-0.6 moderate, and 0.6+ strong. Correlation does not prove causation.">Interpretation: weak (&lt; 0.3), moderate (0.3–0.6), strong (≥ 0.6). Correlation does not imply causation.</div>
       </div>
 
       <div class="card" id="device-card">
@@ -143,6 +157,25 @@ public static class TelemetryDashboardPage
       }
     }
 
+    function classifyCorrelation(value) {
+      if (value === null || value === undefined) return 'n/a';
+      const magnitude = Math.abs(value);
+      if (magnitude >= 0.6) return 'strong';
+      if (magnitude >= 0.3) return 'moderate';
+      return 'weak';
+    }
+
+    function formatCorrelation(value) {
+      return value === null || value === undefined ? 'n/a' : value.toFixed(3);
+    }
+
+    function setCorrelation(prefix, data) {
+      document.getElementById(`corr-${prefix}-pearson`).textContent = formatCorrelation(data?.pearson);
+      document.getElementById(`corr-${prefix}-spearman`).textContent = formatCorrelation(data?.spearman);
+      document.getElementById(`corr-${prefix}-strength`).textContent = classifyCorrelation(data?.pearson);
+      document.getElementById(`corr-${prefix}-confidence`).textContent = data?.confidence ?? 'insufficient';
+    }
+
     function setDevice(data) {
       document.getElementById('device-battery').textContent = formatPercent(data.latestBatteryPercent);
       document.getElementById('device-battery-prediction').textContent = formatPercent(data.latestPredictedBatteryPercent);
@@ -184,6 +217,8 @@ public static class TelemetryDashboardPage
         setSection('spotify', payload.spotify);
         setRuntime(payload.runtime);
         setDevice(payload.device);
+        setCorrelation('15m', payload.cpuToDisplayLatencyCorrelation15m);
+        setCorrelation('1h', payload.cpuToDisplayLatencyCorrelation1h);
         document.getElementById('updated').textContent = new Date(payload.generatedAtUtc).toLocaleTimeString();
       } catch (error) {
         document.getElementById('updated').textContent = `refresh failed (${error.message})`;
