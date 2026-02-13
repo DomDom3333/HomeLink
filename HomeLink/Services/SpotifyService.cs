@@ -226,7 +226,46 @@ public class SpotifyService
 
     public SpotifyTrackInfo? GetCachedTrackSnapshot()
     {
-        return GetOptimisticallyAdvancedCachedTrack();
+        SpotifyTrackInfo? snapshot = GetOptimisticallyAdvancedCachedTrack();
+        if (!IsLikelyOptimisticTerminalState(snapshot))
+        {
+            return snapshot;
+        }
+
+        lock (_cacheLock)
+        {
+            if (_lastTrackInfo == null)
+            {
+                return snapshot;
+            }
+
+            // Preserve the last known server-reported playback state for scheduling decisions.
+            return new SpotifyTrackInfo
+            {
+                Title = _lastTrackInfo.Title,
+                Artist = _lastTrackInfo.Artist,
+                Album = _lastTrackInfo.Album,
+                AlbumCoverUrl = _lastTrackInfo.AlbumCoverUrl,
+                ProgressMs = _lastTrackInfo.ProgressMs,
+                DurationMs = _lastTrackInfo.DurationMs,
+                SpotifyUri = _lastTrackInfo.SpotifyUri,
+                ScannableCodeUrl = _lastTrackInfo.ScannableCodeUrl,
+                IsPlaying = _lastTrackInfo.IsPlaying
+            };
+        }
+    }
+
+    private bool IsLikelyOptimisticTerminalState(SpotifyTrackInfo? snapshot)
+    {
+        if (snapshot == null || snapshot.IsPlaying || snapshot.DurationMs <= 0 || snapshot.ProgressMs < snapshot.DurationMs)
+        {
+            return false;
+        }
+
+        lock (_cacheLock)
+        {
+            return _lastTrackInfo?.IsPlaying == true;
+        }
     }
 
     public async Task<SpotifyTrackInfo?> GetCurrentlyPlayingAsync(TimeSpan? maxCacheStaleness)
@@ -243,7 +282,9 @@ public class SpotifyService
             DateTime lastSyncUtc = GetLastSyncUtc();
             TimeSpan cacheAge = DateTime.UtcNow - lastSyncUtc;
 
-            if (cached != null && maxCacheStaleness.HasValue && cacheAge <= maxCacheStaleness.Value)
+            bool likelyOptimisticTerminalState = IsLikelyOptimisticTerminalState(cached);
+
+            if (cached != null && maxCacheStaleness.HasValue && cacheAge <= maxCacheStaleness.Value && !likelyOptimisticTerminalState)
             {
                 activity?.SetTag("spotify.cache_hit", true);
                 activity?.SetTag("spotify.cache_age_ms", cacheAge.TotalMilliseconds);
@@ -343,7 +384,7 @@ public class SpotifyService
             activity?.SetTag("error", true);
             activity?.AddException(ex);
 
-            SpotifyTrackInfo? fallbackTrack = GetOptimisticallyAdvancedCachedTrack();
+            SpotifyTrackInfo? fallbackTrack = GetCachedTrackSnapshot();
             if (fallbackTrack != null)
             {
                 _logger.LogWarning(ex, "Spotify request failed, returning last cached Spotify state from persistence/memory.");
