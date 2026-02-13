@@ -28,7 +28,12 @@ public static class TelemetryDashboardPage
     .value { color: #f8fafc; font-weight: 600; text-align: right; }
     .footer { margin-top: 16px; color: #94a3b8; font-size: .9rem; }
     .ok { color: #4ade80; }
+    .warn { color: #facc15; }
     .bad { color: #f87171; }
+    .badge { display: inline-flex; align-items: center; justify-content: center; min-width: 64px; padding: 2px 8px; border-radius: 999px; font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .02em; }
+    .badge.ok { color: #052e16; background: #4ade80; }
+    .badge.warn { color: #3f2f00; background: #facc15; }
+    .badge.bad { color: #450a0a; background: #f87171; }
     .history { margin-top: 10px; max-height: 180px; overflow-y: auto; border-top: 1px solid rgba(148, 163, 184, 0.25); padding-top: 8px; }
     .history-row { display: flex; justify-content: space-between; font-size: .85rem; color: #cbd5e1; margin: 4px 0; }
     .hint { font-size: .75rem; color: #94a3b8; margin-top: 6px; line-height: 1.3; }
@@ -108,6 +113,11 @@ public static class TelemetryDashboardPage
         <div class="metric"><span>Error rate</span><span class="value" id="display-error-rate">0%</span></div>
         <div class="metric"><span>Last duration</span><span class="value" id="display-last">0 ms</span></div>
         <div class="metric"><span>Avg duration</span><span class="value" id="display-avg">0 ms</span></div>
+        <div class="metric"><span>p50 (rolling)</span><span class="value" id="display-p50">0 ms</span></div>
+        <div class="metric"><span>p95 (rolling)</span><span class="value" id="display-p95">0 ms</span></div>
+        <div class="metric"><span>p99 (rolling)</span><span class="value" id="display-p99">0 ms</span></div>
+        <div class="metric"><span>SLO (p95 &lt; 800ms)</span><span class="value badge" id="display-slo">n/a</span></div>
+        <div class="hint" id="display-pct-window">Rolling percentile window: n/a</div>
       </div>
 
       <div class="card" id="location-card">
@@ -117,6 +127,11 @@ public static class TelemetryDashboardPage
         <div class="metric"><span>Error rate</span><span class="value" id="location-error-rate">0%</span></div>
         <div class="metric"><span>Last duration</span><span class="value" id="location-last">0 ms</span></div>
         <div class="metric"><span>Avg duration</span><span class="value" id="location-avg">0 ms</span></div>
+        <div class="metric"><span>p50 (rolling)</span><span class="value" id="location-p50">0 ms</span></div>
+        <div class="metric"><span>p95 (rolling)</span><span class="value" id="location-p95">0 ms</span></div>
+        <div class="metric"><span>p99 (rolling)</span><span class="value" id="location-p99">0 ms</span></div>
+        <div class="metric"><span>SLO (p95 &lt; 800ms)</span><span class="value badge" id="location-slo">n/a</span></div>
+        <div class="hint" id="location-pct-window">Rolling percentile window: n/a</div>
       </div>
 
       <div class="card" id="spotify-card">
@@ -126,6 +141,11 @@ public static class TelemetryDashboardPage
         <div class="metric"><span>Error rate</span><span class="value" id="spotify-error-rate">0%</span></div>
         <div class="metric"><span>Last duration</span><span class="value" id="spotify-last">0 ms</span></div>
         <div class="metric"><span>Avg duration</span><span class="value" id="spotify-avg">0 ms</span></div>
+        <div class="metric"><span>p50 (rolling)</span><span class="value" id="spotify-p50">0 ms</span></div>
+        <div class="metric"><span>p95 (rolling)</span><span class="value" id="spotify-p95">0 ms</span></div>
+        <div class="metric"><span>p99 (rolling)</span><span class="value" id="spotify-p99">0 ms</span></div>
+        <div class="metric"><span>SLO (p95 &lt; 800ms)</span><span class="value badge" id="spotify-slo">n/a</span></div>
+        <div class="hint" id="spotify-pct-window">Rolling percentile window: n/a</div>
       </div>
 
       <div class="card" id="runtime-card">
@@ -184,15 +204,37 @@ public static class TelemetryDashboardPage
       lastPayload: null
     };
 
+    function classifySloFromP95(p95Ms) {
+      if (p95Ms === null || p95Ms === undefined || p95Ms <= 0) return { label: 'n/a', cls: '' };
+      if (p95Ms < 800) return { label: 'healthy', cls: 'ok' };
+      if (p95Ms < 1100) return { label: 'at risk', cls: 'warn' };
+      return { label: 'breach', cls: 'bad' };
+    }
+
     function setSection(prefix, data) {
       document.getElementById(`${prefix}-count`).textContent = data.count;
       document.getElementById(`${prefix}-errors`).textContent = data.errors;
       document.getElementById(`${prefix}-error-rate`).textContent = `${data.errorRate}%`;
       document.getElementById(`${prefix}-last`).textContent = `${data.lastDurationMs} ms`;
       document.getElementById(`${prefix}-avg`).textContent = `${data.avgDurationMs} ms`;
+      document.getElementById(`${prefix}-p50`).textContent = `${data.p50DurationMs} ms`;
+      document.getElementById(`${prefix}-p95`).textContent = `${data.p95DurationMs} ms`;
+      document.getElementById(`${prefix}-p99`).textContent = `${data.p99DurationMs} ms`;
+
       const rateElement = document.getElementById(`${prefix}-error-rate`);
       rateElement.classList.remove('ok','bad');
       rateElement.classList.add(data.errorRate < 5 ? 'ok' : 'bad');
+
+      const slo = classifySloFromP95(data.p95DurationMs);
+      const sloElement = document.getElementById(`${prefix}-slo`);
+      sloElement.textContent = slo.label;
+      sloElement.classList.remove('ok', 'warn', 'bad');
+      if (slo.cls) {
+        sloElement.classList.add(slo.cls);
+      }
+
+      const windowLabel = data.percentileWindowSeconds ? `${Math.round(data.percentileWindowSeconds / 60)}m` : 'n/a';
+      document.getElementById(`${prefix}-pct-window`).textContent = `Rolling percentile window: ${windowLabel} (${data.percentileSampleCount ?? 0} samples)`;
     }
 
     function formatPercent(value) {
