@@ -108,6 +108,8 @@ public static class Program
 
         builder.Services.AddHttpClient<Services.LocationService>();
         builder.Services.AddSingleton<Services.LocationService>();
+        builder.Services.AddSingleton<Services.LocationEnrichmentQueue>();
+        builder.Services.AddHostedService<Services.LocationEnrichmentWorker>();
 
         builder.Services.AddHttpClient<Services.DrawingService>();
         builder.Services.AddScoped<Services.DrawingService>();

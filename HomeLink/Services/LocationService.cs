@@ -37,41 +37,80 @@ public class LocationService
     public LocationInfo? GetCachedLocation() => _cachedLocation;
 
     /// <summary>
-    /// Updates the cached location with the provided coordinates.
+    /// Persists a raw location snapshot without any network/geocoding work.
     /// </summary>
-    public async Task<LocationInfo?> UpdateCachedLocationAsync(double latitude, double longitude, OwnTracksMetadata? metadata = null)
+    public async Task<LocationInfo> SaveRawLocationSnapshot(double latitude, double longitude, OwnTracksMetadata? metadata = null)
     {
-        LocationInfo? location = await GetLocationFromCoordinatesAsync(latitude, longitude);
-        if (location != null)
+        string googleMapsUrl = GenerateGoogleMapsUrl(latitude, longitude);
+        string qrCodeUrl = GenerateQrCodeUrl(googleMapsUrl);
+
+        LocationInfo location = new()
         {
-            // Apply OwnTracks metadata if provided
-            if (metadata != null)
-            {
-                location.BatteryLevel = metadata.BatteryLevel;
-                location.BatteryStatus = metadata.BatteryStatus;
-                location.Accuracy = metadata.Accuracy;
-                location.Altitude = metadata.Altitude;
-                location.Velocity = metadata.Velocity;
-                location.Connection = metadata.Connection;
-                location.TrackerId = metadata.TrackerId;
-                location.Timestamp = metadata.Timestamp;
-                
-                // Regenerate human readable text now that we have velocity/movement info
-                if (location.MatchedKnownLocation == null)
-                {
-                    location.HumanReadable = _humanReadableService.CreateHumanReadableText(location);
-                }
-                else
-                {
-                    // For known locations, add movement context if moving
-                    location.HumanReadable = _humanReadableService.CreateHumanReadableTextForKnownLocation(location);
-                }
-            }
-            
-            _cachedLocation = location;
-            await _statePersistenceService.SaveLocationAsync(location);
-        }
+            Latitude = latitude,
+            Longitude = longitude,
+            HumanReadable = "Locating…",
+            GoogleMapsUrl = googleMapsUrl,
+            QrCodeUrl = qrCodeUrl
+        };
+
+        ApplyOwnTracksMetadata(location, metadata);
+
+        _cachedLocation = location;
+        await _statePersistenceService.SaveLocationAsync(location);
         return location;
+    }
+
+    /// <summary>
+    /// Performs reverse geocoding and known-location matching for the provided snapshot.
+    /// </summary>
+    public async Task<LocationInfo?> EnrichLocationAsync(LocationInfo rawSnapshot)
+    {
+        LocationInfo? enriched = await GetLocationFromCoordinatesAsync(rawSnapshot.Latitude, rawSnapshot.Longitude);
+        if (enriched == null)
+            return null;
+
+        ApplyOwnTracksMetadata(enriched, new OwnTracksMetadata
+        {
+            BatteryLevel = rawSnapshot.BatteryLevel,
+            BatteryStatus = rawSnapshot.BatteryStatus,
+            Accuracy = rawSnapshot.Accuracy,
+            Altitude = rawSnapshot.Altitude,
+            Velocity = rawSnapshot.Velocity,
+            Connection = rawSnapshot.Connection,
+            TrackerId = rawSnapshot.TrackerId,
+            Timestamp = rawSnapshot.Timestamp
+        });
+
+        return enriched;
+    }
+
+    public void SetCachedLocation(LocationInfo location)
+    {
+        _cachedLocation = location;
+    }
+
+    private void ApplyOwnTracksMetadata(LocationInfo location, OwnTracksMetadata? metadata)
+    {
+        if (metadata == null)
+            return;
+
+        location.BatteryLevel = metadata.BatteryLevel;
+        location.BatteryStatus = metadata.BatteryStatus;
+        location.Accuracy = metadata.Accuracy;
+        location.Altitude = metadata.Altitude;
+        location.Velocity = metadata.Velocity;
+        location.Connection = metadata.Connection;
+        location.TrackerId = metadata.TrackerId;
+        location.Timestamp = metadata.Timestamp;
+
+        if (location.MatchedKnownLocation == null)
+        {
+            location.HumanReadable = _humanReadableService.CreateHumanReadableText(location);
+        }
+        else
+        {
+            location.HumanReadable = _humanReadableService.CreateHumanReadableTextForKnownLocation(location);
+        }
     }
 
     #endregion
@@ -295,4 +334,3 @@ public class LocationService
         }
     }
 }
-
