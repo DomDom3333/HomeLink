@@ -116,9 +116,15 @@ public class SpotifyService
 
             _logger.LogInformation("Refreshing Spotify access token (forceRefresh: {ForceRefresh}).", forceRefresh);
 
+            long tokenRefreshStart = Stopwatch.GetTimestamp();
             SpotifyClientConfig config = SpotifyClientConfig.CreateDefault();
             AuthorizationCodeRefreshRequest refreshRequest = new AuthorizationCodeRefreshRequest(_clientId ?? string.Empty, _clientSecret ?? string.Empty, refreshToken!);
             AuthorizationCodeRefreshResponse response = await new OAuthClient(config).RequestToken(refreshRequest);
+            double tokenRefreshDurationMs = Stopwatch.GetElapsedTime(tokenRefreshStart).TotalMilliseconds;
+            HomeLinkTelemetry.SpotifyTokenRefreshDurationMs.Record(
+                tokenRefreshDurationMs,
+                new KeyValuePair<string, object?>("component", nameof(SpotifyService)));
+            _dashboardState.RecordSpotifyStage("token_refresh", tokenRefreshDurationMs);
 
             lock (_tokenLock)
             {
@@ -242,6 +248,15 @@ public class SpotifyService
             SpotifyTrackInfo? cached = GetOptimisticallyAdvancedCachedTrack();
             DateTime lastSyncUtc = GetLastSyncUtc();
             TimeSpan cacheAge = DateTime.UtcNow - lastSyncUtc;
+            if (lastSyncUtc != DateTime.MinValue)
+            {
+                double snapshotAgeMs = Math.Max(0, cacheAge.TotalMilliseconds);
+                HomeLinkTelemetry.SpotifySnapshotAgeMs.Record(
+                    snapshotAgeMs,
+                    new KeyValuePair<string, object?>("component", nameof(SpotifyService)));
+                _dashboardState.RecordSpotifySnapshotAge(snapshotAgeMs);
+                activity?.SetTag("spotify.snapshot_age_ms", snapshotAgeMs);
+            }
 
             if (cached != null && maxCacheStaleness.HasValue && cacheAge <= maxCacheStaleness.Value)
             {
@@ -356,7 +371,11 @@ public class SpotifyService
         {
             double elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
             HomeLinkTelemetry.SpotifyRequestDurationMs.Record(elapsedMs);
+            HomeLinkTelemetry.SpotifyPollCycleDurationMs.Record(
+                elapsedMs,
+                new KeyValuePair<string, object?>("component", nameof(SpotifyService)));
             _dashboardState.RecordSpotify(elapsedMs, isError);
+            _dashboardState.RecordSpotifyStage("poll_cycle", elapsedMs);
             activity?.SetTag("spotify.request.duration_ms", elapsedMs);
         }
     }

@@ -148,6 +148,19 @@ public static class TelemetryDashboardPage
         <div class="hint" id="spotify-pct-window">Rolling percentile window: n/a</div>
       </div>
 
+
+      <div class="card" id="stages-card">
+        <h2 class="title">Pipeline Stages</h2>
+        <div class="hint">Dedicated timers for expensive stages (avg/last ms, count).</div>
+        <div class="history" id="stage-history"></div>
+      </div>
+
+      <div class="card" id="queues-card">
+        <h2 class="title">Worker Queues</h2>
+        <div class="hint">Queue depth, enqueue→start lag, and processing duration.</div>
+        <div class="history" id="queue-history"></div>
+      </div>
+
       <div class="card" id="runtime-card">
         <h2 class="title">Server Runtime</h2>
         <div class="metric"><span>Process CPU</span><span class="value" id="runtime-cpu">0%</span></div>
@@ -260,6 +273,52 @@ public static class TelemetryDashboardPage
       const now = Date.now();
       const threshold = now - rangeMs;
       return points.filter(point => point.timestamp >= threshold);
+    }
+
+    function setStageMetrics(payload) {
+      const stageHistory = document.getElementById('stage-history');
+      stageHistory.innerHTML = '';
+
+      const rows = [];
+      for (const section of [
+        { prefix: 'drawing', values: payload?.drawingStages ?? [] },
+        { prefix: 'location', values: payload?.locationStages ?? [] },
+        { prefix: 'spotify', values: payload?.spotifyStages ?? [] }
+      ]) {
+        for (const item of section.values) {
+          rows.push(`${section.prefix}.${item.stage}: avg ${item.avgDurationMs} ms · last ${item.lastDurationMs} ms · n=${item.count}`);
+        }
+      }
+
+      if (rows.length === 0) {
+        stageHistory.textContent = 'No stage samples yet.';
+        return;
+      }
+
+      for (const text of rows) {
+        const row = document.createElement('div');
+        row.className = 'history-row';
+        row.textContent = text;
+        stageHistory.appendChild(row);
+      }
+    }
+
+    function setQueueMetrics(payload) {
+      const queueHistory = document.getElementById('queue-history');
+      queueHistory.innerHTML = '';
+      const rows = payload?.workerQueues ?? [];
+
+      if (rows.length === 0) {
+        queueHistory.textContent = 'No worker queue samples yet.';
+        return;
+      }
+
+      for (const item of rows) {
+        const row = document.createElement('div');
+        row.className = 'history-row';
+        row.textContent = `${item.queue}/${item.worker}: depth ${item.currentDepth} · lag avg ${item.avgEnqueueToStartLagMs} ms · proc avg ${item.avgProcessingDurationMs} ms`;
+        queueHistory.appendChild(row);
+      }
     }
 
     function setRuntime(data) {
@@ -606,6 +665,8 @@ public static class TelemetryDashboardPage
         setSection('display', payload.display);
         setSection('location', payload.location);
         setSection('spotify', payload.spotify);
+        setStageMetrics(payload);
+        setQueueMetrics(payload);
         setRuntime(payload.runtime);
         setDevice(payload.device);
         setCorrelation('15m', payload.cpuToDisplayLatencyCorrelation15m);

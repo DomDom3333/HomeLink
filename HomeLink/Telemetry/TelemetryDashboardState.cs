@@ -1,6 +1,7 @@
 namespace HomeLink.Telemetry;
 
 using System.Threading;
+using System.Collections.Concurrent;
 
 public class TelemetryDashboardState
 {
@@ -25,6 +26,10 @@ public class TelemetryDashboardState
     private readonly Queue<TimedDurationSample> _locationLatencySamples = new();
     private readonly Queue<TimedDurationSample> _spotifyLatencySamples = new();
     private readonly RuntimeTelemetrySampler _runtimeTelemetrySampler;
+    private readonly ConcurrentDictionary<string, StageTelemetryAccumulator> _drawingStages = new();
+    private readonly ConcurrentDictionary<string, StageTelemetryAccumulator> _locationStages = new();
+    private readonly ConcurrentDictionary<string, StageTelemetryAccumulator> _spotifyStages = new();
+    private readonly ConcurrentDictionary<string, WorkerQueueTelemetryAccumulator> _workerQueues = new();
 
     private long _displayRequests;
     private long _displayErrors;
@@ -90,6 +95,36 @@ public class TelemetryDashboardState
         RecordLatency(_spotifyLatencyBuckets, _spotifyLatencySamples, durationMs, DateTimeOffset.UtcNow);
     }
 
+    public void RecordDrawingStage(string stage, double durationMs)
+    {
+        RecordStage(_drawingStages, stage, durationMs);
+    }
+
+    public void RecordLocationStage(string stage, double durationMs)
+    {
+        RecordStage(_locationStages, stage, durationMs);
+    }
+
+    public void RecordSpotifyStage(string stage, double durationMs)
+    {
+        RecordStage(_spotifyStages, stage, durationMs);
+    }
+
+    public void RecordSpotifySnapshotAge(double ageMs)
+    {
+        RecordStage(_spotifyStages, "snapshot_age", ageMs);
+    }
+
+    public void RecordWorkerQueueLag(string queue, string worker, double lagMs, int depth)
+    {
+        GetWorkerQueueAccumulator(queue, worker).RecordLag(lagMs, depth);
+    }
+
+    public void RecordWorkerQueueProcessing(string queue, string worker, double durationMs, int depth)
+    {
+        GetWorkerQueueAccumulator(queue, worker).RecordProcessing(durationMs, depth);
+    }
+
     public TelemetryDashboardSnapshot CreateSnapshot(TelemetrySummaryOptions? options = null)
     {
         TelemetrySummaryOptions resolvedOptions = options ?? TelemetrySummaryOptions.Default;
@@ -107,6 +142,10 @@ public class TelemetryDashboardState
             Display = CreateSection(_displayRequests, _displayErrors, _displayTotalDurationMs, _displayLastDurationMs, _displayLatencySamples),
             Location = CreateSection(_locationUpdates, _locationErrors, _locationTotalDurationMs, _locationLastDurationMs, _locationLatencySamples),
             Spotify = CreateSection(_spotifyRequests, _spotifyErrors, _spotifyTotalDurationMs, _spotifyLastDurationMs, _spotifyLatencySamples),
+            DrawingStages = CreateStageSnapshot(_drawingStages),
+            LocationStages = CreateStageSnapshot(_locationStages),
+            SpotifyStages = CreateStageSnapshot(_spotifyStages),
+            WorkerQueues = CreateWorkerQueueSnapshot(),
             Device = device,
             Runtime = runtime,
             TimeSeries = CreateTimeSeriesSection(resolvedOptions),
@@ -409,6 +448,34 @@ public class TelemetryDashboardState
         return countInWindow / window.TotalHours;
     }
 
+    private static void RecordStage(ConcurrentDictionary<string, StageTelemetryAccumulator> buckets, string stage, double durationMs)
+    {
+        StageTelemetryAccumulator accumulator = buckets.GetOrAdd(stage, _ => new StageTelemetryAccumulator());
+        accumulator.Record(durationMs);
+    }
+
+    private WorkerQueueTelemetryAccumulator GetWorkerQueueAccumulator(string queue, string worker)
+    {
+        return _workerQueues.GetOrAdd($"{queue}:{worker}", _ => new WorkerQueueTelemetryAccumulator(queue, worker));
+    }
+
+    private List<StageTelemetrySnapshot> CreateStageSnapshot(ConcurrentDictionary<string, StageTelemetryAccumulator> source)
+    {
+        return source
+            .OrderBy(entry => entry.Key)
+            .Select(entry => entry.Value.CreateSnapshot(entry.Key))
+            .ToList();
+    }
+
+    private List<WorkerQueueTelemetrySnapshot> CreateWorkerQueueSnapshot()
+    {
+        return _workerQueues.Values
+            .OrderBy(item => item.Queue)
+            .ThenBy(item => item.Worker)
+            .Select(item => item.CreateSnapshot())
+            .ToList();
+    }
+
     private TelemetryDashboardSection CreateSection(
         long requests,
         long errors,
@@ -552,6 +619,14 @@ public class TelemetryDashboardSnapshot
     public TelemetryDashboardSection Location { get; set; } = new();
 
     public TelemetryDashboardSection Spotify { get; set; } = new();
+
+    public List<StageTelemetrySnapshot> DrawingStages { get; set; } = new();
+
+    public List<StageTelemetrySnapshot> LocationStages { get; set; } = new();
+
+    public List<StageTelemetrySnapshot> SpotifyStages { get; set; } = new();
+
+    public List<WorkerQueueTelemetrySnapshot> WorkerQueues { get; set; } = new();
 
     public DeviceTelemetrySection Device { get; set; } = new();
 
@@ -748,6 +823,94 @@ public class LatencyBucketAccumulator
     }
 }
 
+
+public class StageTelemetryAccumulator
+{
+    private long _count;
+    private long _totalDurationMs;
+    private long _lastDurationMs;
+
+    public void Record(double durationMs)
+    {
+        long roundedDuration = Math.Max(0, (long)Math.Round(durationMs, MidpointRounding.AwayFromZero));
+        Interlocked.Increment(ref _count);
+        Interlocked.Add(ref _totalDurationMs, roundedDuration);
+        Interlocked.Exchange(ref _lastDurationMs, roundedDuration);
+    }
+
+    public StageTelemetrySnapshot CreateSnapshot(string stage)
+    {
+        long count = Interlocked.Read(ref _count);
+        long totalDuration = Interlocked.Read(ref _totalDurationMs);
+
+        return new StageTelemetrySnapshot
+        {
+            Stage = stage,
+            Count = count,
+            LastDurationMs = Interlocked.Read(ref _lastDurationMs),
+            AvgDurationMs = count == 0 ? 0 : Math.Round((double)totalDuration / count, 2)
+        };
+    }
+}
+
+public class WorkerQueueTelemetryAccumulator
+{
+    private long _lagCount;
+    private long _lagTotalDurationMs;
+    private long _lagLastDurationMs;
+    private long _processingCount;
+    private long _processingTotalDurationMs;
+    private long _processingLastDurationMs;
+    private int _currentDepth;
+
+    public WorkerQueueTelemetryAccumulator(string queue, string worker)
+    {
+        Queue = queue;
+        Worker = worker;
+    }
+
+    public string Queue { get; }
+
+    public string Worker { get; }
+
+    public void RecordLag(double lagMs, int depth)
+    {
+        long roundedLag = Math.Max(0, (long)Math.Round(lagMs, MidpointRounding.AwayFromZero));
+        Interlocked.Increment(ref _lagCount);
+        Interlocked.Add(ref _lagTotalDurationMs, roundedLag);
+        Interlocked.Exchange(ref _lagLastDurationMs, roundedLag);
+        Interlocked.Exchange(ref _currentDepth, Math.Max(0, depth));
+    }
+
+    public void RecordProcessing(double durationMs, int depth)
+    {
+        long roundedDuration = Math.Max(0, (long)Math.Round(durationMs, MidpointRounding.AwayFromZero));
+        Interlocked.Increment(ref _processingCount);
+        Interlocked.Add(ref _processingTotalDurationMs, roundedDuration);
+        Interlocked.Exchange(ref _processingLastDurationMs, roundedDuration);
+        Interlocked.Exchange(ref _currentDepth, Math.Max(0, depth));
+    }
+
+    public WorkerQueueTelemetrySnapshot CreateSnapshot()
+    {
+        long lagCount = Interlocked.Read(ref _lagCount);
+        long processingCount = Interlocked.Read(ref _processingCount);
+
+        return new WorkerQueueTelemetrySnapshot
+        {
+            Queue = Queue,
+            Worker = Worker,
+            CurrentDepth = Math.Max(0, Volatile.Read(ref _currentDepth)),
+            LagCount = lagCount,
+            ProcessingCount = processingCount,
+            LastEnqueueToStartLagMs = Interlocked.Read(ref _lagLastDurationMs),
+            AvgEnqueueToStartLagMs = lagCount == 0 ? 0 : Math.Round((double)Interlocked.Read(ref _lagTotalDurationMs) / lagCount, 2),
+            LastProcessingDurationMs = Interlocked.Read(ref _processingLastDurationMs),
+            AvgProcessingDurationMs = processingCount == 0 ? 0 : Math.Round((double)Interlocked.Read(ref _processingTotalDurationMs) / processingCount, 2)
+        };
+    }
+}
+
 public record TelemetrySummaryOptions(TimeSpan Window, TimeSpan Resolution, int MaxPoints)
 {
     private const int DefaultMaxChartPoints = 200;
@@ -806,6 +969,38 @@ public class TelemetryDashboardSection
 }
 
 public readonly record struct TimedDurationSample(DateTimeOffset TimestampUtc, long DurationMs);
+
+public class StageTelemetrySnapshot
+{
+    public string Stage { get; set; } = string.Empty;
+
+    public long Count { get; set; }
+
+    public long LastDurationMs { get; set; }
+
+    public double AvgDurationMs { get; set; }
+}
+
+public class WorkerQueueTelemetrySnapshot
+{
+    public string Queue { get; set; } = string.Empty;
+
+    public string Worker { get; set; } = string.Empty;
+
+    public int CurrentDepth { get; set; }
+
+    public long LagCount { get; set; }
+
+    public long ProcessingCount { get; set; }
+
+    public long LastEnqueueToStartLagMs { get; set; }
+
+    public double AvgEnqueueToStartLagMs { get; set; }
+
+    public long LastProcessingDurationMs { get; set; }
+
+    public double AvgProcessingDurationMs { get; set; }
+}
 
 public class DeviceTelemetrySection
 {

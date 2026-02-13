@@ -1,6 +1,8 @@
 ﻿using System.Text.Json;
 using System.Globalization;
+using System.Diagnostics;
 using HomeLink.Models;
+using HomeLink.Telemetry;
 
 namespace HomeLink.Services;
 
@@ -9,6 +11,7 @@ public class LocationService
     private readonly HttpClient _httpClient;
     private readonly HumanReadableService _humanReadableService;
     private readonly StatePersistenceService _statePersistenceService;
+    private readonly TelemetryDashboardState _dashboardState;
     private readonly List<KnownLocation> _knownLocations = new();
     private const string NominatimBaseUrl = "https://nominatim.openstreetmap.org/reverse";
     private const double EarthRadiusMeters = 6371000;
@@ -16,12 +19,13 @@ public class LocationService
     // Cached location data
     private LocationInfo? _cachedLocation;
 
-    public LocationService(HttpClient httpClient, StatePersistenceService statePersistenceService)
+    public LocationService(HttpClient httpClient, StatePersistenceService statePersistenceService, TelemetryDashboardState dashboardState)
     {
         _httpClient = httpClient;
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("HomeLink/1.0");
         _humanReadableService = new HumanReadableService();
         _statePersistenceService = statePersistenceService;
+        _dashboardState = dashboardState;
 
         // Load known locations from environment variable KNOWN_LOCATIONS (see loader comment for format)
         LoadKnownLocationsFromEnv();
@@ -41,6 +45,7 @@ public class LocationService
     /// </summary>
     public async Task<LocationInfo> SaveRawLocationSnapshot(double latitude, double longitude, OwnTracksMetadata? metadata = null)
     {
+        long ingestStart = Stopwatch.GetTimestamp();
         string googleMapsUrl = GenerateGoogleMapsUrl(latitude, longitude);
         string qrCodeUrl = GenerateQrCodeUrl(googleMapsUrl);
 
@@ -56,7 +61,22 @@ public class LocationService
         ApplyOwnTracksMetadata(location, metadata);
 
         _cachedLocation = location;
+        long persistenceStart = Stopwatch.GetTimestamp();
         await _statePersistenceService.SaveLocationAsync(location);
+        double persistenceDurationMs = Stopwatch.GetElapsedTime(persistenceStart).TotalMilliseconds;
+        HomeLinkTelemetry.LocationPersistenceDurationMs.Record(
+            persistenceDurationMs,
+            new KeyValuePair<string, object?>("component", nameof(LocationService)),
+            new KeyValuePair<string, object?>("stage", "raw_snapshot"));
+        _dashboardState.RecordLocationStage("persistence", persistenceDurationMs);
+
+        double rawIngestDurationMs = Stopwatch.GetElapsedTime(ingestStart).TotalMilliseconds;
+        HomeLinkTelemetry.LocationRawIngestDurationMs.Record(
+            rawIngestDurationMs,
+            new KeyValuePair<string, object?>("component", nameof(LocationService)),
+            new KeyValuePair<string, object?>("stage", "raw_ingest"));
+        _dashboardState.RecordLocationStage("raw_ingest", rawIngestDurationMs);
+
         return location;
     }
 
@@ -225,7 +245,15 @@ public class LocationService
             string lonStr = longitude.ToString("G", CultureInfo.InvariantCulture);
             string url = $"{NominatimBaseUrl}?lat={latStr}&lon={lonStr}&format=json&addressdetails=1";
 
+            long reverseGeocodeStart = Stopwatch.GetTimestamp();
             HttpResponseMessage response = await _httpClient.GetAsync(url);
+            double reverseGeocodeDurationMs = Stopwatch.GetElapsedTime(reverseGeocodeStart).TotalMilliseconds;
+            HomeLinkTelemetry.LocationReverseGeocodeDurationMs.Record(
+                reverseGeocodeDurationMs,
+                new KeyValuePair<string, object?>("component", nameof(LocationService)),
+                new KeyValuePair<string, object?>("stage", "reverse_geocode"));
+            _dashboardState.RecordLocationStage("reverse_geocode", reverseGeocodeDurationMs);
+
             if (!response.IsSuccessStatusCode)
             {
                 // Read body for diagnostics (Nominatim often returns useful error details)
