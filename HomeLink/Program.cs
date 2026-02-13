@@ -108,10 +108,14 @@ public static class Program
 
         builder.Services.AddHttpClient<Services.LocationService>();
         builder.Services.AddSingleton<Services.LocationService>();
+        builder.Services.AddSingleton<Services.LocationEnrichmentQueue>();
+        builder.Services.AddHostedService<Services.LocationEnrichmentWorker>();
 
         builder.Services.AddHttpClient<Services.DrawingService>();
         builder.Services.AddScoped<Services.DrawingService>();
         builder.Services.AddScoped<Services.DisplayDataService>();
+        builder.Services.AddSingleton<Services.DisplayFrameCacheService>();
+        builder.Services.AddHostedService<Services.DisplayRenderWorker>();
 
         builder.Services.AddControllers();
         builder.Services.AddHealthChecks();
@@ -131,6 +135,7 @@ public static class Program
             options.RequestHeaders.Add("If-None-Match");
             options.ResponseHeaders.Add("ETag");
             options.ResponseHeaders.Add("X-Device-Battery");
+            options.ResponseHeaders.Add("X-Frame-Age-Ms");
             options.ResponseHeaders.Add("X-Trace-Id");
             options.CombineLogs = true;
         });

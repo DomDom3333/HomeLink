@@ -1,6 +1,8 @@
 ﻿using System.Text.Json;
 using System.Globalization;
+using System.Diagnostics;
 using HomeLink.Models;
+using HomeLink.Telemetry;
 
 namespace HomeLink.Services;
 
@@ -9,6 +11,7 @@ public class LocationService
     private readonly HttpClient _httpClient;
     private readonly HumanReadableService _humanReadableService;
     private readonly StatePersistenceService _statePersistenceService;
+    private readonly TelemetryDashboardState _dashboardState;
     private readonly List<KnownLocation> _knownLocations = new();
     private const string NominatimBaseUrl = "https://nominatim.openstreetmap.org/reverse";
     private const double EarthRadiusMeters = 6371000;
@@ -16,12 +19,13 @@ public class LocationService
     // Cached location data
     private LocationInfo? _cachedLocation;
 
-    public LocationService(HttpClient httpClient, StatePersistenceService statePersistenceService)
+    public LocationService(HttpClient httpClient, StatePersistenceService statePersistenceService, TelemetryDashboardState dashboardState)
     {
         _httpClient = httpClient;
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("HomeLink/1.0");
         _humanReadableService = new HumanReadableService();
         _statePersistenceService = statePersistenceService;
+        _dashboardState = dashboardState;
 
         // Load known locations from environment variable KNOWN_LOCATIONS (see loader comment for format)
         LoadKnownLocationsFromEnv();
@@ -37,41 +41,96 @@ public class LocationService
     public LocationInfo? GetCachedLocation() => _cachedLocation;
 
     /// <summary>
-    /// Updates the cached location with the provided coordinates.
+    /// Persists a raw location snapshot without any network/geocoding work.
     /// </summary>
-    public async Task<LocationInfo?> UpdateCachedLocationAsync(double latitude, double longitude, OwnTracksMetadata? metadata = null)
+    public async Task<LocationInfo> SaveRawLocationSnapshot(double latitude, double longitude, OwnTracksMetadata? metadata = null)
     {
-        LocationInfo? location = await GetLocationFromCoordinatesAsync(latitude, longitude);
-        if (location != null)
+        long ingestStart = Stopwatch.GetTimestamp();
+        string googleMapsUrl = GenerateGoogleMapsUrl(latitude, longitude);
+        string qrCodeUrl = GenerateQrCodeUrl(googleMapsUrl);
+
+        LocationInfo location = new()
         {
-            // Apply OwnTracks metadata if provided
-            if (metadata != null)
-            {
-                location.BatteryLevel = metadata.BatteryLevel;
-                location.BatteryStatus = metadata.BatteryStatus;
-                location.Accuracy = metadata.Accuracy;
-                location.Altitude = metadata.Altitude;
-                location.Velocity = metadata.Velocity;
-                location.Connection = metadata.Connection;
-                location.TrackerId = metadata.TrackerId;
-                location.Timestamp = metadata.Timestamp;
-                
-                // Regenerate human readable text now that we have velocity/movement info
-                if (location.MatchedKnownLocation == null)
-                {
-                    location.HumanReadable = _humanReadableService.CreateHumanReadableText(location);
-                }
-                else
-                {
-                    // For known locations, add movement context if moving
-                    location.HumanReadable = _humanReadableService.CreateHumanReadableTextForKnownLocation(location);
-                }
-            }
-            
-            _cachedLocation = location;
-            await _statePersistenceService.SaveLocationAsync(location);
-        }
+            Latitude = latitude,
+            Longitude = longitude,
+            HumanReadable = "Locating…",
+            GoogleMapsUrl = googleMapsUrl,
+            QrCodeUrl = qrCodeUrl
+        };
+
+        ApplyOwnTracksMetadata(location, metadata);
+
+        _cachedLocation = location;
+        long persistenceStart = Stopwatch.GetTimestamp();
+        await _statePersistenceService.SaveLocationAsync(location);
+        double persistenceDurationMs = Stopwatch.GetElapsedTime(persistenceStart).TotalMilliseconds;
+        HomeLinkTelemetry.LocationPersistenceDurationMs.Record(
+            persistenceDurationMs,
+            new KeyValuePair<string, object?>("component", nameof(LocationService)),
+            new KeyValuePair<string, object?>("stage", "raw_snapshot"));
+        _dashboardState.RecordLocationStage("persistence", persistenceDurationMs);
+
+        double rawIngestDurationMs = Stopwatch.GetElapsedTime(ingestStart).TotalMilliseconds;
+        HomeLinkTelemetry.LocationRawIngestDurationMs.Record(
+            rawIngestDurationMs,
+            new KeyValuePair<string, object?>("component", nameof(LocationService)),
+            new KeyValuePair<string, object?>("stage", "raw_ingest"));
+        _dashboardState.RecordLocationStage("raw_ingest", rawIngestDurationMs);
+
         return location;
+    }
+
+    /// <summary>
+    /// Performs reverse geocoding and known-location matching for the provided snapshot.
+    /// </summary>
+    public async Task<LocationInfo?> EnrichLocationAsync(LocationInfo rawSnapshot)
+    {
+        LocationInfo? enriched = await GetLocationFromCoordinatesAsync(rawSnapshot.Latitude, rawSnapshot.Longitude);
+        if (enriched == null)
+            return null;
+
+        ApplyOwnTracksMetadata(enriched, new OwnTracksMetadata
+        {
+            BatteryLevel = rawSnapshot.BatteryLevel,
+            BatteryStatus = rawSnapshot.BatteryStatus,
+            Accuracy = rawSnapshot.Accuracy,
+            Altitude = rawSnapshot.Altitude,
+            Velocity = rawSnapshot.Velocity,
+            Connection = rawSnapshot.Connection,
+            TrackerId = rawSnapshot.TrackerId,
+            Timestamp = rawSnapshot.Timestamp
+        });
+
+        return enriched;
+    }
+
+    public void SetCachedLocation(LocationInfo location)
+    {
+        _cachedLocation = location;
+    }
+
+    private void ApplyOwnTracksMetadata(LocationInfo location, OwnTracksMetadata? metadata)
+    {
+        if (metadata == null)
+            return;
+
+        location.BatteryLevel = metadata.BatteryLevel;
+        location.BatteryStatus = metadata.BatteryStatus;
+        location.Accuracy = metadata.Accuracy;
+        location.Altitude = metadata.Altitude;
+        location.Velocity = metadata.Velocity;
+        location.Connection = metadata.Connection;
+        location.TrackerId = metadata.TrackerId;
+        location.Timestamp = metadata.Timestamp;
+
+        if (location.MatchedKnownLocation == null)
+        {
+            location.HumanReadable = _humanReadableService.CreateHumanReadableText(location);
+        }
+        else
+        {
+            location.HumanReadable = _humanReadableService.CreateHumanReadableTextForKnownLocation(location);
+        }
     }
 
     #endregion
@@ -186,7 +245,15 @@ public class LocationService
             string lonStr = longitude.ToString("G", CultureInfo.InvariantCulture);
             string url = $"{NominatimBaseUrl}?lat={latStr}&lon={lonStr}&format=json&addressdetails=1";
 
+            long reverseGeocodeStart = Stopwatch.GetTimestamp();
             HttpResponseMessage response = await _httpClient.GetAsync(url);
+            double reverseGeocodeDurationMs = Stopwatch.GetElapsedTime(reverseGeocodeStart).TotalMilliseconds;
+            HomeLinkTelemetry.LocationReverseGeocodeDurationMs.Record(
+                reverseGeocodeDurationMs,
+                new KeyValuePair<string, object?>("component", nameof(LocationService)),
+                new KeyValuePair<string, object?>("stage", "reverse_geocode"));
+            _dashboardState.RecordLocationStage("reverse_geocode", reverseGeocodeDurationMs);
+
             if (!response.IsSuccessStatusCode)
             {
                 // Read body for diagnostics (Nominatim often returns useful error details)
@@ -295,4 +362,3 @@ public class LocationService
         }
     }
 }
-

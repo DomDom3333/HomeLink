@@ -1,6 +1,4 @@
 ﻿using System.Diagnostics;
-using System.Security.Cryptography;
-using System.Text;
 using HomeLink.Models;
 using Microsoft.AspNetCore.Mvc;
 using HomeLink.Services;
@@ -17,14 +15,16 @@ public class DisplayController : ControllerBase
     private readonly LocationService _locationService;
     private readonly ILogger<DisplayController> _logger;
     private readonly TelemetryDashboardState _dashboardState;
+    private readonly DisplayFrameCacheService _displayFrameCache;
 
-    public DisplayController(DrawingService drawingService, SpotifyService spotifyService, LocationService locationService, ILogger<DisplayController> logger, TelemetryDashboardState dashboardState)
+    public DisplayController(DrawingService drawingService, SpotifyService spotifyService, LocationService locationService, ILogger<DisplayController> logger, TelemetryDashboardState dashboardState, DisplayFrameCacheService displayFrameCache)
     {
         _drawingService = drawingService;
         _spotifyService = spotifyService;
         _locationService = locationService;
         _logger = logger;
         _dashboardState = dashboardState;
+        _displayFrameCache = displayFrameCache;
     }
 
     /// <summary>
@@ -39,7 +39,8 @@ public class DisplayController : ControllerBase
     [ProducesResponseType(StatusCodes.Status304NotModified)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status400BadRequest)]
     [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status401Unauthorized)]
-    public async Task<IActionResult> RenderDisplay([FromQuery] bool dither = true, [FromQuery] int? deviceBattery = null)
+    [ProducesResponseType(typeof(ErrorResponse), StatusCodes.Status503ServiceUnavailable)]
+    public IActionResult RenderDisplay([FromQuery] bool dither = true, [FromQuery] int? deviceBattery = null)
     {
         long startTimestamp = Stopwatch.GetTimestamp();
         bool isError = false;
@@ -54,6 +55,8 @@ public class DisplayController : ControllerBase
 
         _logger.LogInformation("RenderDisplay request received. Dither: {Dither}, DeviceBattery: {DeviceBattery}", dither, deviceBattery);
 
+        _displayFrameCache.UpdateRequestedRenderOptions(dither, deviceBattery);
+
         if (!_spotifyService.IsAuthorized)
         {
             _logger.LogWarning("RenderDisplay denied: Spotify is not authorized.");
@@ -65,34 +68,39 @@ public class DisplayController : ControllerBase
 
         try
         {
-            SpotifyTrackInfo? spotifyData = await _spotifyService.GetCurrentlyPlayingAsync();
-            LocationInfo? locationData = _locationService.GetCachedLocation();
-
-            // Compute ETag from stable source data (excluding volatile timestamps)
-            string etag = ComputeSourceDataEtag(spotifyData, locationData, dither, deviceBattery);
+            DisplayFrameSnapshot? snapshot = _displayFrameCache.GetLatestFrame();
+            if (snapshot == null)
+            {
+                Response.Headers["Cache-Control"] = "no-store, no-transform, private";
+                Response.Headers["Pragma"] = "no-cache";
+                Response.Headers["X-Frame-Age-Ms"] = "-1";
+                activity?.SetTag("http.response.status_code", 503);
+                _logger.LogInformation("RenderDisplay no cached frame available yet.");
+                return StatusCode(StatusCodes.Status503ServiceUnavailable,
+                    new ErrorResponse { Error = "Display frame not ready yet. Retry shortly." });
+            }
 
             // Ensure cache/etag headers are included even on 304 responses
-            Response.Headers.ETag = etag;
+            Response.Headers.ETag = snapshot.Etag;
             Response.Headers["Cache-Control"] = "no-store, no-transform, private";
             Response.Headers["Pragma"] = "no-cache";
+            long ageMs = Math.Max(0, (long)(DateTimeOffset.UtcNow - snapshot.GeneratedAtUtc).TotalMilliseconds);
+            Response.Headers["X-Frame-Age-Ms"] = ageMs.ToString();
 
             // Check If-None-Match header before rendering
-            if (Request.Headers.IfNoneMatch.Count > 0 && Request.Headers.IfNoneMatch.Contains(etag))
+            if (Request.Headers.IfNoneMatch.Count > 0 && Request.Headers.IfNoneMatch.Contains(snapshot.Etag))
             {
-                _logger.LogInformation("RenderDisplay returning 304 Not Modified. ETag: {Etag}", etag);
+                _logger.LogInformation("RenderDisplay returning 304 Not Modified. ETag: {Etag}", snapshot.Etag);
                 activity?.SetTag("http.response.status_code", 304);
                 return StatusCode(StatusCodes.Status304NotModified);
             }
 
-            // Render bitmap only if needed
-            EInkBitmap bitmap = await _drawingService.DrawDisplayDataAsync(spotifyData, locationData, dither, deviceBattery);
-
             // Metadata in headers (ESP32 can read these if desired)
-            Response.Headers["X-Width"] = bitmap.Width.ToString();
-            Response.Headers["X-Height"] = bitmap.Height.ToString();
-            Response.Headers["X-BytesPerLine"] = bitmap.BytesPerLine.ToString();
-            Response.Headers["X-Dithered"] = dither ? "true" : "false";
-            Response.ContentLength = bitmap.PackedData.Length;
+            Response.Headers["X-Width"] = snapshot.Width.ToString();
+            Response.Headers["X-Height"] = snapshot.Height.ToString();
+            Response.Headers["X-BytesPerLine"] = snapshot.BytesPerLine.ToString();
+            Response.Headers["X-Dithered"] = snapshot.Dithered ? "true" : "false";
+            Response.ContentLength = snapshot.FrameBytes.Length;
             // Diagnostic header - echo device battery when provided (helps confirm public URL received the query)
             if (deviceBattery.HasValue)
                 Response.Headers["X-Device-Battery"] = deviceBattery.Value.ToString();
@@ -100,11 +108,11 @@ public class DisplayController : ControllerBase
             Response.Headers["Content-Disposition"] = "attachment; filename=display.bin";
 
             // Body is raw packed bytes (e.g. 64800 bytes for 960x540 @ 1bpp)
-            _logger.LogInformation("RenderDisplay returning bitmap bytes. Width: {Width}, Height: {Height}, Bytes: {ByteCount}", bitmap.Width, bitmap.Height, bitmap.PackedData.Length);
+            _logger.LogInformation("RenderDisplay returning cached bitmap bytes. Width: {Width}, Height: {Height}, Bytes: {ByteCount}, FrameAgeMs: {FrameAgeMs}", snapshot.Width, snapshot.Height, snapshot.FrameBytes.Length, ageMs);
             activity?.SetTag("http.response.status_code", 200);
-            activity?.SetTag("display.bitmap.width", bitmap.Width);
-            activity?.SetTag("display.bitmap.height", bitmap.Height);
-            return File(bitmap.PackedData, "application/octet-stream");
+            activity?.SetTag("display.bitmap.width", snapshot.Width);
+            activity?.SetTag("display.bitmap.height", snapshot.Height);
+            return File(snapshot.FrameBytes, "application/octet-stream");
         }
         catch (Exception ex)
         {
@@ -124,60 +132,6 @@ public class DisplayController : ControllerBase
         }
     }
 
-    private static string ComputeSourceDataEtag(SpotifyTrackInfo? spotify, LocationInfo? location, bool dither, int? deviceBattery = null)
-    {
-        var sb = new StringBuilder();
-
-        // Include dither setting
-        sb.Append($"dither:{dither}|");
-
-        // Include device battery in coarse buckets to avoid noise
-        if (deviceBattery.HasValue)
-        {
-            int clampedBattery = Math.Clamp(deviceBattery.Value, 0, 100);
-            int batteryBucket = clampedBattery / 10; // 0..10
-            sb.Append($"deviceBatteryBucket:{batteryBucket}|");
-        }
-
-        // Include stable Spotify fields (exclude raw ProgressMs)
-        if (spotify != null)
-        {
-            sb.Append($"spotify:");
-            sb.Append($"title:{spotify.Title}|");
-            sb.Append($"artist:{spotify.Artist}|");
-            sb.Append($"album:{spotify.Album}|");
-            sb.Append($"coverUrl:{spotify.AlbumCoverUrl}|");
-            sb.Append($"duration:{spotify.DurationMs}|");
-            sb.Append($"uri:{spotify.SpotifyUri}|");
-            sb.Append($"playing:{spotify.IsPlaying}|");
-            long progressBucket10s = Math.Max(0L, spotify.ProgressMs) / 10000L;
-            sb.Append($"progressMin:{progressBucket10s}|");
-        }
-
-        // Include stable Location fields (exclude timestamps, battery, velocity, etc.)
-        if (location != null)
-        {
-            sb.Append($"location:");
-            // Round coordinates to ~11m precision (5 decimal places) to avoid minor GPS drift
-            sb.Append($"lat:{Math.Round(location.Latitude, 5)}|");
-            sb.Append($"lon:{Math.Round(location.Longitude, 5)}|");
-            sb.Append($"name:{location.DisplayName}|");
-            sb.Append($"hr:{location.HumanReadable}|");
-            sb.Append($"district:{location.District}|");
-            sb.Append($"city:{location.City}|");
-            sb.Append($"town:{location.Town}|");
-            sb.Append($"village:{location.Village}|");
-            sb.Append($"country:{location.Country}|");
-            sb.Append($"knownLoc:{location.MatchedKnownLocation?.Name}|");
-            // Exclude: BatteryLevel, BatteryStatus, Accuracy, Altitude, Velocity, Timestamp
-            // (these change frequently but don't affect the display meaningfully)
-        }
-
-        string content = sb.ToString();
-        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(content));
-        string tag = Convert.ToHexString(hash);
-        return $"\"{tag}\"";
-    }
     /// <summary>
     /// Renders the display image as a PNG file.
     /// </summary>

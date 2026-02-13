@@ -5,6 +5,8 @@ using SixLabors.ImageSharp.Processing;
 using SixLabors.Fonts;
 using HomeLink.Models;
 using HomeLink.Utils;
+using HomeLink.Telemetry;
+using System.Diagnostics;
 
 namespace HomeLink.Services;
 
@@ -29,11 +31,13 @@ public class DrawingService
     private readonly QrCodeService _qrCodeService;
     private readonly MapTileService _mapTileService;
     private readonly IconDrawingService _iconDrawingService;
+    private readonly TelemetryDashboardState _dashboardState;
 
-    public DrawingService(HttpClient httpClient, ILogger<DrawingService> logger, ILoggerFactory loggerFactory)
+    public DrawingService(HttpClient httpClient, ILogger<DrawingService> logger, ILoggerFactory loggerFactory, TelemetryDashboardState dashboardState)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _dashboardState = dashboardState;
         FontCollection fontCollection = new();
         _noAaOptions = new DrawingOptions
         {
@@ -94,23 +98,28 @@ public class DrawingService
         // Create a grayscale image at display resolution (horizontal)
         using Image<L8> image = new Image<L8>(DisplayWidth, DisplayHeight, new L8(255)); // White background
 
+        long staticStart = Stopwatch.GetTimestamp();
         DrawContent(image, spotifyData, locationData, deviceBattery);
+        RecordDrawingStage("static_draw", staticStart);
         
         // Draw dynamic content (album art, map)
         await DrawDynamicContentAsync(image, spotifyData, locationData);
 
+        long ditherPackStart = Stopwatch.GetTimestamp();
         if (dither)
         {
             // Apply Floyd-Steinberg dithering for 1-bit conversion
             using Image<L8> ditheredBitmap = _ditheringService.DitherImage(image, 2);
             // Convert to packed 1-bit format
-            return _ditheringService.ConvertToPacked1Bit(ditheredBitmap, 2);
+            EInkBitmap packed = _ditheringService.ConvertToPacked1Bit(ditheredBitmap, 2);
+            RecordDrawingStage("dither_pack", ditherPackStart);
+            return packed;
         }
-        else
-        {
-            // Return grayscale without dithering
-            return _ditheringService.ConvertToGrayscaleBitmap(image);
-        }
+
+        // Return grayscale without dithering
+        EInkBitmap grayscale = _ditheringService.ConvertToGrayscaleBitmap(image);
+        RecordDrawingStage("dither_pack", ditherPackStart);
+        return grayscale;
     }
 
 
@@ -126,11 +135,14 @@ public class DrawingService
         // Create a grayscale image at display resolution (horizontal)
         using Image<L8> image = new Image<L8>(DisplayWidth, DisplayHeight, new L8(255)); // White background
 
+        long staticStart = Stopwatch.GetTimestamp();
         DrawContent(image, spotifyData, locationData, deviceBattery);
+        RecordDrawingStage("static_draw", staticStart);
         await DrawDynamicContentAsync(image, spotifyData, locationData);
 
         using MemoryStream ms = new MemoryStream();
         
+        long ditherPackStart = Stopwatch.GetTimestamp();
         if (dither)
         {
             // Dither for 1-bit preview (matches e-ink look)
@@ -142,6 +154,7 @@ public class DrawingService
             // Return undithered grayscale image
             await image.SaveAsPngAsync(ms);
         }
+        RecordDrawingStage("dither_pack", ditherPackStart);
         
         return ms.ToArray();
     }
@@ -387,6 +400,7 @@ public class DrawingService
         int mapSize = 180;
 
         // === LEFT: Album Art ===
+        long albumArtStart = Stopwatch.GetTimestamp();
         if (spotifyData != null && !string.IsNullOrEmpty(spotifyData.AlbumCoverUrl))
         {
             await DrawAlbumArtAsync(image, spotifyData.AlbumCoverUrl, Margin, Margin, AlbumArtSize);
@@ -395,12 +409,26 @@ public class DrawingService
         {
             DrawPlaceholder(image, Margin, Margin, AlbumArtSize, "No Album Art", font, mediumGray);
         }
+        RecordDrawingStage("album_art_fetch_draw", albumArtStart);
 
         // === LEFT: Static Map Image ===
+        long mapStart = Stopwatch.GetTimestamp();
         if (locationData != null)
         {
             await _mapTileService.DrawStaticMapAsync(image, locationData.Latitude, locationData.Longitude, Margin, bottomY, mapSize);
         }
+        RecordDrawingStage("map_tile_fetch_draw", mapStart);
+    }
+
+
+    private void RecordDrawingStage(string stage, long startTimestamp)
+    {
+        double elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
+        HomeLinkTelemetry.DrawingStageDurationMs.Record(
+            elapsedMs,
+            new KeyValuePair<string, object?>("component", nameof(DrawingService)),
+            new KeyValuePair<string, object?>("stage", stage));
+        _dashboardState.RecordDrawingStage(stage, elapsedMs);
     }
 
     /// <summary>

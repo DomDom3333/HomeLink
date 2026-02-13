@@ -135,12 +135,14 @@ public class LocationController : ControllerBase
     private readonly LocationService _locationService;
     private readonly ILogger<LocationController> _logger;
     private readonly TelemetryDashboardState _dashboardState;
+    private readonly LocationEnrichmentQueue _locationEnrichmentQueue;
 
-    public LocationController(LocationService locationService, ILogger<LocationController> logger, TelemetryDashboardState dashboardState)
+    public LocationController(LocationService locationService, ILogger<LocationController> logger, TelemetryDashboardState dashboardState, LocationEnrichmentQueue locationEnrichmentQueue)
     {
         _locationService = locationService;
         _logger = logger;
         _dashboardState = dashboardState;
+        _locationEnrichmentQueue = locationEnrichmentQueue;
     }
 
     /// <summary>
@@ -188,7 +190,6 @@ public class LocationController : ControllerBase
 
         try
         {
-            // Create metadata from OwnTracks payload
             OwnTracksMetadata metadata = new()
             {
                 BatteryLevel = payload.Battery,
@@ -201,20 +202,19 @@ public class LocationController : ControllerBase
                 Timestamp = payload.Timestamp
             };
 
-            LocationInfo? location = await _locationService.UpdateCachedLocationAsync(
+            LocationInfo rawSnapshot = await _locationService.SaveRawLocationSnapshot(
                 payload.Latitude.Value,
                 payload.Longitude.Value,
                 metadata);
 
+            _locationEnrichmentQueue.Enqueue(rawSnapshot);
+
             _logger.LogInformation(
-                "Updated cached location: {HumanReadable} ({Lat}, {Lon}) from tracker {TrackerId}",
-                location?.HumanReadable ?? "Unknown",
+                "Saved raw location snapshot and queued enrichment for ({Lat}, {Lon}) from tracker {TrackerId}",
                 payload.Latitude.Value,
                 payload.Longitude.Value,
                 payload.TrackerId ?? "unknown");
 
-            // OwnTracks expects an array response (can contain commands to send back)
-            // Empty array means no commands
             _logger.LogInformation("ReceiveOwnTracksUpdate processed successfully. Returning empty command array.");
             activity?.SetTag("http.response.status_code", 200);
             return Ok(Array.Empty<object>());

@@ -116,9 +116,15 @@ public class SpotifyService
 
             _logger.LogInformation("Refreshing Spotify access token (forceRefresh: {ForceRefresh}).", forceRefresh);
 
+            long tokenRefreshStart = Stopwatch.GetTimestamp();
             SpotifyClientConfig config = SpotifyClientConfig.CreateDefault();
             AuthorizationCodeRefreshRequest refreshRequest = new AuthorizationCodeRefreshRequest(_clientId ?? string.Empty, _clientSecret ?? string.Empty, refreshToken!);
             AuthorizationCodeRefreshResponse response = await new OAuthClient(config).RequestToken(refreshRequest);
+            double tokenRefreshDurationMs = Stopwatch.GetElapsedTime(tokenRefreshStart).TotalMilliseconds;
+            HomeLinkTelemetry.SpotifyTokenRefreshDurationMs.Record(
+                tokenRefreshDurationMs,
+                new KeyValuePair<string, object?>("component", nameof(SpotifyService)));
+            _dashboardState.RecordSpotifyStage("token_refresh", tokenRefreshDurationMs);
 
             lock (_tokenLock)
             {
@@ -224,7 +230,12 @@ public class SpotifyService
         }
     }
 
-    public async Task<SpotifyTrackInfo?> GetCurrentlyPlayingAsync()
+    public SpotifyTrackInfo? GetCachedTrackSnapshot()
+    {
+        return GetOptimisticallyAdvancedCachedTrack();
+    }
+
+    public async Task<SpotifyTrackInfo?> GetCurrentlyPlayingAsync(TimeSpan? maxCacheStaleness)
     {
         long startTimestamp = Stopwatch.GetTimestamp();
         bool isError = false;
@@ -234,15 +245,34 @@ public class SpotifyService
 
         try
         {
-            // First, if we have cached info and the song hasn't ended yet, return the locally advanced value
             SpotifyTrackInfo? cached = GetOptimisticallyAdvancedCachedTrack();
+            DateTime lastSyncUtc = GetLastSyncUtc();
+            TimeSpan cacheAge = DateTime.UtcNow - lastSyncUtc;
+            if (lastSyncUtc != DateTime.MinValue)
+            {
+                double snapshotAgeMs = Math.Max(0, cacheAge.TotalMilliseconds);
+                HomeLinkTelemetry.SpotifySnapshotAgeMs.Record(
+                    snapshotAgeMs,
+                    new KeyValuePair<string, object?>("component", nameof(SpotifyService)));
+                _dashboardState.RecordSpotifySnapshotAge(snapshotAgeMs);
+                activity?.SetTag("spotify.snapshot_age_ms", snapshotAgeMs);
+            }
+
+            if (cached != null && maxCacheStaleness.HasValue && cacheAge <= maxCacheStaleness.Value)
+            {
+                activity?.SetTag("spotify.cache_hit", true);
+                activity?.SetTag("spotify.cache_age_ms", cacheAge.TotalMilliseconds);
+                return cached;
+            }
+
+            // First, if we have cached info and the song hasn't ended yet, return the locally advanced value
             if (cached != null && cached.IsPlaying)
             {
-                DateTime lastSyncUtc = GetLastSyncUtc();
-                TimeSpan cacheAge = DateTime.UtcNow - lastSyncUtc;
                 // Only trust optimistic cache for a short window to detect skips/pauses promptly.
                 if (cached.ProgressMs < cached.DurationMs && cacheAge <= MaxOptimisticCacheAge)
                 {
+                    activity?.SetTag("spotify.cache_hit", true);
+                    activity?.SetTag("spotify.cache_age_ms", cacheAge.TotalMilliseconds);
                     return cached;
                 }
             }
@@ -341,8 +371,18 @@ public class SpotifyService
         {
             double elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
             HomeLinkTelemetry.SpotifyRequestDurationMs.Record(elapsedMs);
+            HomeLinkTelemetry.SpotifyPollCycleDurationMs.Record(
+                elapsedMs,
+                new KeyValuePair<string, object?>("component", nameof(SpotifyService)));
             _dashboardState.RecordSpotify(elapsedMs, isError);
+            _dashboardState.RecordSpotifyStage("poll_cycle", elapsedMs);
             activity?.SetTag("spotify.request.duration_ms", elapsedMs);
         }
     }
+
+    public Task<SpotifyTrackInfo?> GetCurrentlyPlayingAsync()
+    {
+        return GetCurrentlyPlayingAsync(maxCacheStaleness: null);
+    }
+
 }

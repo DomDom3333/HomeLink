@@ -37,4 +37,53 @@ public static class HomeLinkTelemetry
         "homelink.spotify.currently_playing.duration",
         unit: "ms",
         description: "Duration of Spotify currently-playing fetch operations.");
+
+    public static readonly Histogram<double> DrawingStageDurationMs = Meter.CreateHistogram<double>(
+        "homelink.drawing.stage.duration",
+        unit: "ms",
+        description: "Duration of drawing pipeline stages with component/stage tags.");
+
+    public static readonly Histogram<double> LocationRawIngestDurationMs = Meter.CreateHistogram<double>(
+        "homelink.location.raw_ingest.duration",
+        unit: "ms",
+        description: "Duration of ingesting and caching a raw OwnTracks location snapshot.");
+
+    public static readonly Histogram<double> LocationReverseGeocodeDurationMs = Meter.CreateHistogram<double>(
+        "homelink.location.reverse_geocode.duration",
+        unit: "ms",
+        description: "Duration of reverse-geocode network calls.");
+
+    public static readonly Histogram<double> LocationPersistenceDurationMs = Meter.CreateHistogram<double>(
+        "homelink.location.persistence.duration",
+        unit: "ms",
+        description: "Duration of location persistence operations.");
+
+    public static readonly Histogram<double> SpotifyPollCycleDurationMs = Meter.CreateHistogram<double>(
+        "homelink.spotify.poll_cycle.duration",
+        unit: "ms",
+        description: "Duration of Spotify polling cycles.");
+
+    public static readonly Histogram<double> SpotifyTokenRefreshDurationMs = Meter.CreateHistogram<double>(
+        "homelink.spotify.token_refresh.duration",
+        unit: "ms",
+        description: "Duration of Spotify token refresh operations.");
+
+    public static readonly Histogram<double> SpotifySnapshotAgeMs = Meter.CreateHistogram<double>(
+        "homelink.spotify.snapshot_age",
+        unit: "ms",
+        description: "Age of Spotify track snapshot data when consumed.");
+
+    public static readonly Histogram<double> WorkerQueueEnqueueToStartLagMs = Meter.CreateHistogram<double>(
+        "homelink.worker.queue.enqueue_to_start_lag",
+        unit: "ms",
+        description: "Lag from queue enqueue to worker processing start.");
+
+    public static readonly Histogram<double> WorkerQueueProcessingDurationMs = Meter.CreateHistogram<double>(
+        "homelink.worker.queue.processing.duration",
+        unit: "ms",
+        description: "Worker processing time for queued jobs.");
+
+    public static readonly UpDownCounter<long> WorkerQueueDepth = Meter.CreateUpDownCounter<long>(
+        "homelink.worker.queue.depth",
+        description: "Current queue depth by worker queue.");
 }
