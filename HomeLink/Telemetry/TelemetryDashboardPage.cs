@@ -168,6 +168,7 @@ public static class TelemetryDashboardPage
         <div class="metric"><span>Req last day</span><span class="value" id="device-last-day">0</span></div>
         <div class="metric"><span>Avg req / hour (1d)</span><span class="value" id="device-avg-hour">0</span></div>
         <div class="metric"><span>Avg req / day (1d)</span><span class="value" id="device-avg-day">0</span></div>
+        <div class="metric"><span>Last screen refresh</span><span class="value" id="device-last-refresh">n/a</span></div>
         <div class="history" id="device-history"></div>
       </div>
     </div>
@@ -237,6 +238,11 @@ public static class TelemetryDashboardPage
 
     function formatMb(value) {
       return value === null || value === undefined ? 'n/a' : `${value} MB`;
+    }
+
+    function formatTimestamp(value) {
+      if (!value) return 'n/a';
+      return new Date(value).toLocaleString();
     }
 
     function parseTimestamp(value) {
@@ -336,6 +342,7 @@ public static class TelemetryDashboardPage
       document.getElementById('device-last-day').textContent = data.requestsLastDay;
       document.getElementById('device-avg-hour').textContent = data.avgRequestsPerHour;
       document.getElementById('device-avg-day').textContent = data.avgRequestsPerDay;
+      document.getElementById('device-last-refresh').textContent = formatTimestamp(data.lastDisplayRefreshAtUtc);
 
       const history = document.getElementById('device-history');
       history.innerHTML = '';

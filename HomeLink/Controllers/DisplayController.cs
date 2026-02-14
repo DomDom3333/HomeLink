@@ -44,6 +44,7 @@ public class DisplayController : ControllerBase
     {
         long startTimestamp = Stopwatch.GetTimestamp();
         bool isError = false;
+        bool screenRefreshed = false;
         HomeLinkTelemetry.DisplayRenderRequests.Add(1);
 
         using Activity? activity = HomeLinkTelemetry.ActivitySource.StartActivity("DisplayController.RenderDisplay", ActivityKind.Server);
@@ -112,6 +113,7 @@ public class DisplayController : ControllerBase
             activity?.SetTag("http.response.status_code", 200);
             activity?.SetTag("display.bitmap.width", snapshot.Width);
             activity?.SetTag("display.bitmap.height", snapshot.Height);
+            screenRefreshed = true;
             return File(snapshot.FrameBytes, "application/octet-stream");
         }
         catch (Exception ex)
@@ -127,7 +129,7 @@ public class DisplayController : ControllerBase
         {
             double elapsedMs = Stopwatch.GetElapsedTime(startTimestamp).TotalMilliseconds;
             HomeLinkTelemetry.DisplayRenderDurationMs.Record(elapsedMs);
-            _dashboardState.RecordDisplay(elapsedMs, isError, deviceBattery);
+            _dashboardState.RecordDisplay(elapsedMs, isError, deviceBattery, screenRefreshed);
             activity?.SetTag("display.duration_ms", elapsedMs);
         }
     }

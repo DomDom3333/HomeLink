@@ -16,6 +16,7 @@ public class TelemetryDashboardState
     private readonly Lock _timelineLock = new();
     private readonly Lock _latencyLock = new();
     private readonly Queue<DateTimeOffset> _displayRequestTimeline = new();
+    private DateTimeOffset? _lastDisplayRefreshAtUtc;
     private readonly Queue<DeviceBatterySample> _batteryHistory = new();
     private readonly Queue<LatencyBucketAccumulator> _displayLatencyBuckets = new();
     private readonly Queue<LatencyBucketAccumulator> _locationLatencyBuckets = new();
@@ -49,7 +50,7 @@ public class TelemetryDashboardState
         _runtimeTelemetrySampler = runtimeTelemetrySampler;
     }
 
-    public void RecordDisplay(double durationMs, bool isError, int? deviceBattery = null)
+    public void RecordDisplay(double durationMs, bool isError, int? deviceBattery = null, bool didRefreshScreen = false)
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
         Record(ref _displayRequests, ref _displayErrors, ref _displayTotalDurationMs, ref _displayLastDurationMs, durationMs, isError);
@@ -59,6 +60,11 @@ public class TelemetryDashboardState
         {
             _displayRequestTimeline.Enqueue(now);
             TrimOldEntries(now);
+
+            if (didRefreshScreen)
+            {
+                _lastDisplayRefreshAtUtc = now;
+            }
 
             if (deviceBattery.HasValue)
             {
@@ -194,7 +200,8 @@ public class TelemetryDashboardState
                 RequestsLastHour = CountSince(_displayRequestTimeline, now - OneHour),
                 RequestsLastDay = CountSince(_displayRequestTimeline, now - OneDay),
                 AvgRequestsPerHour = Math.Round(CalculateRate(_displayRequestTimeline, now, OneHour), 2),
-                AvgRequestsPerDay = Math.Round(CalculateRate(_displayRequestTimeline, now, OneDay), 2)
+                AvgRequestsPerDay = Math.Round(CalculateRate(_displayRequestTimeline, now, OneDay), 2),
+                LastDisplayRefreshAtUtc = _lastDisplayRefreshAtUtc
             };
         }
     }
@@ -828,6 +835,8 @@ public class DeviceTelemetrySection
     public double AvgRequestsPerHour { get; set; }
 
     public double AvgRequestsPerDay { get; set; }
+
+    public DateTimeOffset? LastDisplayRefreshAtUtc { get; set; }
 
     public List<DeviceBatterySample> BatteryHistory { get; set; } = new();
 }
