@@ -38,7 +38,6 @@ public static class DisplayFrameHashService
             sb.Append($"lat:{Math.Round(location.Latitude, 5)}|");
             sb.Append($"lon:{Math.Round(location.Longitude, 5)}|");
             sb.Append($"name:{location.DisplayName}|");
-            sb.Append($"hr:{location.HumanReadable}|");
             sb.Append($"district:{location.District}|");
             sb.Append($"city:{location.City}|");
             sb.Append($"town:{location.Town}|");
