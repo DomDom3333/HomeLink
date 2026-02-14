@@ -94,18 +94,6 @@ public static class TelemetryDashboardPage
         <svg id="chart-latency" class="chart" viewBox="0 0 900 220" preserveAspectRatio="none"></svg>
       </div>
 
-      <div class="card chart-card">
-        <h2 class="title">Overlay chart: CPU% vs Display latency</h2>
-        <div class="chart-meta">
-          <div class="chart-legend">
-            <span class="legend-item"><span class="legend-swatch" style="background:#38bdf8"></span>CPU %</span>
-            <span class="legend-item"><span class="legend-swatch" style="background:#f59e0b"></span>Display latency (ms)</span>
-          </div>
-          <span id="overlay-status">Awaiting telemetry…</span>
-        </div>
-        <svg id="chart-overlay" class="chart" viewBox="0 0 900 220" preserveAspectRatio="none"></svg>
-      </div>
-
       <div class="card" id="display-card">
         <h2 class="title">Display Render</h2>
         <div class="metric"><span>Calls</span><span class="value" id="display-count">0</span></div>
@@ -169,19 +157,6 @@ public static class TelemetryDashboardPage
         <div class="metric"><span>Thread count</span><span class="value" id="runtime-threads">0</span></div>
         <div class="metric"><span>GC collections (0/1/2)</span><span class="value" id="runtime-gc-collections">0 / 0 / 0</span></div>
         <div class="history" id="runtime-history"></div>
-      </div>
-
-      <div class="card" id="correlation-card">
-        <h2 class="title">CPU ↔ Display Latency Correlation</h2>
-        <div class="metric"><span title="Pearson captures linear relationship from -1 to +1. Positive means higher CPU tends to coincide with higher display latency.">15m Pearson</span><span class="value" id="corr-15m-pearson">n/a</span></div>
-        <div class="metric"><span title="Spearman captures monotonic rank relationship and is less sensitive to outliers.">15m Spearman</span><span class="value" id="corr-15m-spearman">n/a</span></div>
-        <div class="metric"><span>15m Strength</span><span class="value" id="corr-15m-strength">n/a</span></div>
-        <div class="metric"><span>15m Confidence</span><span class="value" id="corr-15m-confidence">insufficient</span></div>
-        <div class="metric"><span title="Pearson captures linear relationship from -1 to +1. Positive means higher CPU tends to coincide with higher display latency.">1h Pearson</span><span class="value" id="corr-1h-pearson">n/a</span></div>
-        <div class="metric"><span title="Spearman captures monotonic rank relationship and is less sensitive to outliers.">1h Spearman</span><span class="value" id="corr-1h-spearman">n/a</span></div>
-        <div class="metric"><span>1h Strength</span><span class="value" id="corr-1h-strength">n/a</span></div>
-        <div class="metric"><span>1h Confidence</span><span class="value" id="corr-1h-confidence">insufficient</span></div>
-        <div class="hint" title="|r| under 0.3 is usually weak, 0.3-0.6 moderate, and 0.6+ strong. Correlation does not prove causation.">Interpretation: weak (&lt; 0.3), moderate (0.3–0.6), strong (≥ 0.6). Correlation does not imply causation.</div>
       </div>
 
       <div class="card" id="device-card">
@@ -351,25 +326,6 @@ public static class TelemetryDashboardPage
         row.appendChild(right);
         history.appendChild(row);
       }
-    }
-
-    function classifyCorrelation(value) {
-      if (value === null || value === undefined) return 'n/a';
-      const magnitude = Math.abs(value);
-      if (magnitude >= 0.6) return 'strong';
-      if (magnitude >= 0.3) return 'moderate';
-      return 'weak';
-    }
-
-    function formatCorrelation(value) {
-      return value === null || value === undefined ? 'n/a' : value.toFixed(3);
-    }
-
-    function setCorrelation(prefix, data) {
-      document.getElementById(`corr-${prefix}-pearson`).textContent = formatCorrelation(data?.pearson);
-      document.getElementById(`corr-${prefix}-spearman`).textContent = formatCorrelation(data?.spearman);
-      document.getElementById(`corr-${prefix}-strength`).textContent = classifyCorrelation(data?.pearson);
-      document.getElementById(`corr-${prefix}-confidence`).textContent = data?.confidence ?? 'insufficient';
     }
 
     function setDevice(data) {
@@ -580,57 +536,9 @@ public static class TelemetryDashboardPage
       status.textContent = `${filteredAll.length} samples in ${dashboardState.selectedRange}`;
     }
 
-    function renderOverlayChart(payload) {
-      const rangeMs = rangeMsByKey[dashboardState.selectedRange];
-      const runtime = (payload.runtime?.history ?? []).map(entry => ({
-        timestamp: parseTimestamp(entry.timestampUtc),
-        cpu: entry.processCpuPercent
-      }));
-      const display = (payload.timeSeries?.displayLatency ?? []).map(entry => ({
-        timestamp: parseTimestamp(entry.timestampUtc),
-        latency: entry.avgDurationMs
-      }));
-
-      const filteredDisplay = filterRange(display, rangeMs);
-      const filteredRuntime = filterRange(runtime, rangeMs);
-      const status = document.getElementById('overlay-status');
-      const svg = clearChart('chart-overlay');
-      const bucketMs = (payload.timeSeries?.bucketSizeSeconds ?? 30) * 1000;
-
-      const merged = [];
-      for (const latencyPoint of filteredDisplay) {
-        const cpuInBucket = filteredRuntime.filter(cpuPoint =>
-          cpuPoint.timestamp >= latencyPoint.timestamp && cpuPoint.timestamp < latencyPoint.timestamp + bucketMs);
-
-        if (cpuInBucket.length === 0) continue;
-        merged.push({
-          timestamp: latencyPoint.timestamp,
-          cpu: cpuInBucket.reduce((sum, item) => sum + item.cpu, 0) / cpuInBucket.length,
-          latency: latencyPoint.latency
-        });
-      }
-
-      if (merged.length < 2) {
-        status.textContent = 'Insufficient overlapping CPU/latency samples in selected range.';
-        return;
-      }
-
-      const xDomain = { min: merged[0].timestamp, max: merged[merged.length - 1].timestamp };
-      const cpuDomain = computeDomain(merged.map(point => point.cpu), true);
-      const latencyDomain = computeDomain(merged.map(point => point.latency), true);
-
-      drawGrid(svg, xDomain.min, xDomain.max, cpuDomain.min, cpuDomain.max);
-      plotLine(svg, merged.map(point => ({ timestamp: point.timestamp, value: point.cpu })), xDomain, cpuDomain, '#38bdf8');
-      plotLine(svg, merged.map(point => ({ timestamp: point.timestamp, value: point.latency })), xDomain, latencyDomain, '#f59e0b');
-      addAxisLabels(svg, `CPU (${cpuDomain.min.toFixed(1)}-${cpuDomain.max.toFixed(1)}%)`, `Latency (${latencyDomain.min.toFixed(0)}-${latencyDomain.max.toFixed(0)} ms)`);
-
-      status.textContent = `${merged.length} overlapping points in ${dashboardState.selectedRange}`;
-    }
-
     function renderCharts(payload) {
       renderCpuRamChart(payload);
       renderLatencyChart(payload);
-      renderOverlayChart(payload);
     }
 
     function updateRangeButtons() {
@@ -669,8 +577,6 @@ public static class TelemetryDashboardPage
         setQueueMetrics(payload);
         setRuntime(payload.runtime);
         setDevice(payload.device);
-        setCorrelation('15m', payload.cpuToDisplayLatencyCorrelation15m);
-        setCorrelation('1h', payload.cpuToDisplayLatencyCorrelation1h);
         renderCharts(payload);
 
         document.getElementById('updated').textContent = new Date(payload.generatedAtUtc).toLocaleTimeString();
