@@ -103,57 +103,59 @@ public class StatePersistenceService
             await connection.OpenAsync();
 
             await using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = @"
-                SELECT
-                    latitude, longitude, display_name, human_readable,
-                    district, city, town, village, country,
-                    matched_known_location_name, matched_known_location_display_text,
-                    matched_known_location_latitude, matched_known_location_longitude,
-                    matched_known_location_radius_meters, matched_known_location_icon,
-                    google_maps_url, qr_code_url,
-                    battery_level, battery_status, accuracy, altitude, velocity,
-                    connection, tracker_id, location_timestamp
-                FROM location_state
-                WHERE id = 1;";
+            command.CommandText = """
+
+                                                  SELECT
+                                                      latitude, longitude, display_name, human_readable,
+                                                      district, city, town, village, country,
+                                                      matched_known_location_name, matched_known_location_display_text,
+                                                      matched_known_location_latitude, matched_known_location_longitude,
+                                                      matched_known_location_radius_meters, matched_known_location_icon,
+                                                      google_maps_url, qr_code_url,
+                                                      battery_level, battery_status, accuracy, altitude, velocity,
+                                                      connection, tracker_id, location_timestamp
+                                                  FROM location_state
+                                                  WHERE id = 1;
+                                  """;
 
             await using SqliteDataReader reader = await command.ExecuteReaderAsync();
             if (!await reader.ReadAsync())
                 return null;
 
             KnownLocation? knownLocation = null;
-            if (!reader.IsDBNull(9) && !reader.IsDBNull(10) && !reader.IsDBNull(11) && !reader.IsDBNull(12))
+            if (!await reader.IsDBNullAsync(9) && !await reader.IsDBNullAsync(10) && !await reader.IsDBNullAsync(11) && !await reader.IsDBNullAsync(12))
             {
                 knownLocation = new KnownLocation(
                     reader.GetString(9),
                     reader.GetString(10),
                     reader.GetDouble(11),
                     reader.GetDouble(12),
-                    reader.IsDBNull(13) ? 100 : reader.GetDouble(13),
-                    reader.IsDBNull(14) ? null : reader.GetString(14));
+                    await reader.IsDBNullAsync(13) ? 100 : reader.GetDouble(13),
+                    await reader.IsDBNullAsync(14) ? null : reader.GetString(14));
             }
 
             return new LocationInfo
             {
                 Latitude = reader.GetDouble(0),
                 Longitude = reader.GetDouble(1),
-                DisplayName = reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
-                HumanReadable = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
-                District = reader.IsDBNull(4) ? null : reader.GetString(4),
-                City = reader.IsDBNull(5) ? null : reader.GetString(5),
-                Town = reader.IsDBNull(6) ? null : reader.GetString(6),
-                Village = reader.IsDBNull(7) ? null : reader.GetString(7),
-                Country = reader.IsDBNull(8) ? null : reader.GetString(8),
+                DisplayName = await reader.IsDBNullAsync(2) ? string.Empty : reader.GetString(2),
+                HumanReadable = await reader.IsDBNullAsync(3) ? string.Empty : reader.GetString(3),
+                District = await reader.IsDBNullAsync(4) ? null : reader.GetString(4),
+                City = await reader.IsDBNullAsync(5) ? null : reader.GetString(5),
+                Town = await reader.IsDBNullAsync(6) ? null : reader.GetString(6),
+                Village = await reader.IsDBNullAsync(7) ? null : reader.GetString(7),
+                Country = await reader.IsDBNullAsync(8) ? null : reader.GetString(8),
                 MatchedKnownLocation = knownLocation,
-                GoogleMapsUrl = reader.IsDBNull(15) ? string.Empty : reader.GetString(15),
-                QrCodeUrl = reader.IsDBNull(16) ? string.Empty : reader.GetString(16),
-                BatteryLevel = reader.IsDBNull(17) ? null : reader.GetInt32(17),
-                BatteryStatus = reader.IsDBNull(18) ? null : reader.GetInt32(18),
-                Accuracy = reader.IsDBNull(19) ? null : reader.GetInt32(19),
-                Altitude = reader.IsDBNull(20) ? null : reader.GetInt32(20),
-                Velocity = reader.IsDBNull(21) ? null : reader.GetInt32(21),
-                Connection = reader.IsDBNull(22) ? null : reader.GetString(22),
-                TrackerId = reader.IsDBNull(23) ? null : reader.GetString(23),
-                Timestamp = reader.IsDBNull(24) ? null : reader.GetInt64(24)
+                GoogleMapsUrl = await reader.IsDBNullAsync(15) ? string.Empty : reader.GetString(15),
+                QrCodeUrl = await reader.IsDBNullAsync(16) ? string.Empty : reader.GetString(16),
+                BatteryLevel = await reader.IsDBNullAsync(17) ? null : reader.GetInt32(17),
+                BatteryStatus = await reader.IsDBNullAsync(18) ? null : reader.GetInt32(18),
+                Accuracy = await reader.IsDBNullAsync(19) ? null : reader.GetInt32(19),
+                Altitude = await reader.IsDBNullAsync(20) ? null : reader.GetInt32(20),
+                Velocity = await reader.IsDBNullAsync(21) ? null : reader.GetInt32(21),
+                Connection = await reader.IsDBNullAsync(22) ? null : reader.GetString(22),
+                TrackerId = await reader.IsDBNullAsync(23) ? null : reader.GetString(23),
+                Timestamp = await reader.IsDBNullAsync(24) ? null : reader.GetInt64(24)
             };
         }
         finally
@@ -171,28 +173,30 @@ public class StatePersistenceService
             await connection.OpenAsync();
 
             await using SqliteCommand command = connection.CreateCommand();
-            command.CommandText = @"
-                INSERT INTO spotify_state (
-                    id, title, artist, album, album_cover_url,
-                    progress_ms, duration_ms, spotify_uri, scannable_code_url,
-                    is_playing, last_sync_utc
-                ) VALUES (
-                    1, $title, $artist, $album, $albumCoverUrl,
-                    $progressMs, $durationMs, $spotifyUri, $scannableCodeUrl,
-                    $isPlaying, $lastSyncUtc
-                )
-                ON CONFLICT(id) DO UPDATE SET
-                    title = excluded.title,
-                    artist = excluded.artist,
-                    album = excluded.album,
-                    album_cover_url = excluded.album_cover_url,
-                    progress_ms = excluded.progress_ms,
-                    duration_ms = excluded.duration_ms,
-                    spotify_uri = excluded.spotify_uri,
-                    scannable_code_url = excluded.scannable_code_url,
-                    is_playing = excluded.is_playing,
-                    last_sync_utc = excluded.last_sync_utc,
-                    updated_utc = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');";
+            command.CommandText = """
+
+                                                  INSERT INTO spotify_state (
+                                                      id, title, artist, album, album_cover_url,
+                                                      progress_ms, duration_ms, spotify_uri, scannable_code_url,
+                                                      is_playing, last_sync_utc
+                                                  ) VALUES (
+                                                      1, $title, $artist, $album, $albumCoverUrl,
+                                                      $progressMs, $durationMs, $spotifyUri, $scannableCodeUrl,
+                                                      $isPlaying, $lastSyncUtc
+                                                  )
+                                                  ON CONFLICT(id) DO UPDATE SET
+                                                      title = excluded.title,
+                                                      artist = excluded.artist,
+                                                      album = excluded.album,
+                                                      album_cover_url = excluded.album_cover_url,
+                                                      progress_ms = excluded.progress_ms,
+                                                      duration_ms = excluded.duration_ms,
+                                                      spotify_uri = excluded.spotify_uri,
+                                                      scannable_code_url = excluded.scannable_code_url,
+                                                      is_playing = excluded.is_playing,
+                                                      last_sync_utc = excluded.last_sync_utc,
+                                                      updated_utc = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');
+                                  """;
 
             command.Parameters.AddWithValue("$title", trackInfo.Title);
             command.Parameters.AddWithValue("$artist", trackInfo.Artist);
@@ -233,7 +237,7 @@ public class StatePersistenceService
             if (!await reader.ReadAsync())
                 return null;
 
-            string lastSyncRaw = reader.IsDBNull(9) ? string.Empty : reader.GetString(9);
+            string lastSyncRaw = await reader.IsDBNullAsync(9) ? string.Empty : reader.GetString(9);
             DateTime lastSyncUtc = DateTime.MinValue;
             if (!string.IsNullOrWhiteSpace(lastSyncRaw) &&
                 DateTime.TryParse(lastSyncRaw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTime parsedLastSync))
@@ -243,15 +247,15 @@ public class StatePersistenceService
 
             SpotifyTrackInfo trackInfo = new()
             {
-                Title = reader.IsDBNull(0) ? string.Empty : reader.GetString(0),
-                Artist = reader.IsDBNull(1) ? string.Empty : reader.GetString(1),
-                Album = reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
-                AlbumCoverUrl = reader.IsDBNull(3) ? string.Empty : reader.GetString(3),
-                ProgressMs = reader.IsDBNull(4) ? 0 : reader.GetInt64(4),
-                DurationMs = reader.IsDBNull(5) ? 0 : reader.GetInt64(5),
-                SpotifyUri = reader.IsDBNull(6) ? string.Empty : reader.GetString(6),
-                ScannableCodeUrl = reader.IsDBNull(7) ? string.Empty : reader.GetString(7),
-                IsPlaying = !reader.IsDBNull(8) && reader.GetInt64(8) == 1
+                Title = await reader.IsDBNullAsync(0) ? string.Empty : reader.GetString(0),
+                Artist = await reader.IsDBNullAsync(1) ? string.Empty : reader.GetString(1),
+                Album = await reader.IsDBNullAsync(2) ? string.Empty : reader.GetString(2),
+                AlbumCoverUrl = await reader.IsDBNullAsync(3) ? string.Empty : reader.GetString(3),
+                ProgressMs = await reader.IsDBNullAsync(4) ? 0 : reader.GetInt64(4),
+                DurationMs = await reader.IsDBNullAsync(5) ? 0 : reader.GetInt64(5),
+                SpotifyUri = await reader.IsDBNullAsync(6) ? string.Empty : reader.GetString(6),
+                ScannableCodeUrl = await reader.IsDBNullAsync(7) ? string.Empty : reader.GetString(7),
+                IsPlaying = !await reader.IsDBNullAsync(8) && reader.GetInt64(8) == 1
             };
 
             return (trackInfo, lastSyncUtc);

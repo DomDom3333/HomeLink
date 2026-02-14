@@ -21,7 +21,7 @@ public class DisplayDataService
         };
     }
 
-    public SpotifyDisplayData? BuildSpotifyData(SpotifyTrackInfo? spotifyData)
+    private SpotifyDisplayData? BuildSpotifyData(SpotifyTrackInfo? spotifyData)
     {
         if (spotifyData == null)
         {
@@ -47,16 +47,17 @@ public class DisplayDataService
         };
     }
 
-    public LocationDisplayData? BuildLocationData(LocationInfo? locationData)
+    private LocationDisplayData? BuildLocationData(LocationInfo? locationData)
     {
         if (locationData == null)
         {
             return null;
         }
 
+        string locationDataDisplayName = !string.IsNullOrEmpty(locationData.DisplayName) ? locationData.DisplayName : "Unknown Location";
         string locationText = !string.IsNullOrEmpty(locationData.HumanReadable)
             ? locationData.HumanReadable
-            : (!string.IsNullOrEmpty(locationData.DisplayName) ? locationData.DisplayName : "Unknown Location");
+            : locationDataDisplayName;
 
         return new LocationDisplayData
         {
@@ -98,7 +99,7 @@ public class DisplayDataService
             statusParts.Add($"±{locationData.Accuracy}m");
         }
 
-        if (locationData.Velocity.HasValue && locationData.Velocity.Value > 0)
+        if (locationData.Velocity is > 0)
         {
             statusParts.Add($"{locationData.Velocity} km/h");
         }

@@ -28,8 +28,8 @@ public static class DisplayFrameHashService
             sb.Append($"duration:{spotify.DurationMs}|");
             sb.Append($"uri:{spotify.SpotifyUri}|");
             sb.Append($"playing:{spotify.IsPlaying}|");
-            long progressBucket10s = Math.Max(0L, spotify.ProgressMs) / 10000L;
-            sb.Append($"progressMin:{progressBucket10s}|");
+            long progressBucket10S = Math.Max(0L, spotify.ProgressMs) / 10000L;
+            sb.Append($"progressMin:{progressBucket10S}|");
         }
 
         if (location != null)

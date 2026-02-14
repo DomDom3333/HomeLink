@@ -1,7 +1,7 @@
-namespace HomeLink;
-
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
+
+namespace HomeLink.Telemetry;
 
 public static class HomeLinkTelemetry
 {
@@ -9,7 +9,7 @@ public static class HomeLinkTelemetry
     public const string MeterName = "HomeLink.Metrics";
 
     public static readonly ActivitySource ActivitySource = new(ActivitySourceName);
-    public static readonly Meter Meter = new(MeterName);
+    private static readonly Meter Meter = new(MeterName);
 
     public static readonly Counter<long> DisplayRenderRequests = Meter.CreateCounter<long>(
         "homelink.display.render.requests",

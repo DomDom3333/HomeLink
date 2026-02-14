@@ -62,7 +62,7 @@ public sealed class DisplayRenderWorker : BackgroundService
         {
             try
             {
-                nextWait = await RenderIfChangedAsync(stoppingToken);
+                nextWait = await RenderIfChangedAsync();
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -80,7 +80,7 @@ public sealed class DisplayRenderWorker : BackgroundService
         _logger.LogInformation("DisplayRenderWorker stopping.");
     }
 
-    private async Task<TimeSpan> RenderIfChangedAsync(CancellationToken cancellationToken)
+    private async Task<TimeSpan> RenderIfChangedAsync()
     {
         if (!_spotifyService.IsAuthorized)
         {

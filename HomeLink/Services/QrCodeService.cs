@@ -30,9 +30,9 @@ public class QrCodeService
     {
         try
         {
-            using QRCodeGenerator qrGenerator = new QRCodeGenerator();
+            using QRCodeGenerator qrGenerator = new();
             QRCodeData qrCodeData = qrGenerator.CreateQrCode(data, QRCodeGenerator.ECCLevel.M);
-            using PngByteQRCode qrCode = new PngByteQRCode(qrCodeData);
+            using PngByteQRCode qrCode = new(qrCodeData);
             byte[] qrBytes = qrCode.GetGraphic(20);
 
             using Image<L8> qrImage = Image.Load<L8>(qrBytes);

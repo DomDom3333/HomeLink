@@ -1,7 +1,6 @@
 ﻿using System.Diagnostics;
 using HomeLink.Models;
 using HomeLink.Telemetry;
-using Microsoft.Extensions.Logging;
 using SpotifyAPI.Web;
 
 namespace HomeLink.Services;
@@ -13,8 +12,8 @@ public class SpotifyService
     private readonly string? _clientSecret;
     private readonly TelemetryDashboardState _dashboardState;
     private readonly StatePersistenceService _statePersistenceService;
-    private readonly object _tokenLock = new();
-    private readonly object _cacheLock = new();
+    private readonly Lock _tokenLock = new();
+    private readonly Lock _cacheLock = new();
     private readonly SemaphoreSlim _refreshSemaphore = new(1, 1);
     
     private string? _accessToken;
@@ -70,8 +69,8 @@ public class SpotifyService
 
     private async Task<SpotifyClient> GetClientAsync()
     {
-        string? accessToken = await EnsureAccessTokenAsync(forceRefresh: false);
-        return new SpotifyClient(SpotifyClientConfig.CreateDefault().WithToken(accessToken));
+        string accessToken = await EnsureAccessTokenAsync(forceRefresh: false);
+        return new(SpotifyClientConfig.CreateDefault().WithToken(accessToken));
     }
 
     private async Task<string> EnsureAccessTokenAsync(bool forceRefresh)
@@ -118,7 +117,7 @@ public class SpotifyService
 
             long tokenRefreshStart = Stopwatch.GetTimestamp();
             SpotifyClientConfig config = SpotifyClientConfig.CreateDefault();
-            AuthorizationCodeRefreshRequest refreshRequest = new AuthorizationCodeRefreshRequest(_clientId ?? string.Empty, _clientSecret ?? string.Empty, refreshToken!);
+            AuthorizationCodeRefreshRequest refreshRequest = new(_clientId ?? string.Empty, _clientSecret ?? string.Empty, refreshToken!);
             AuthorizationCodeRefreshResponse response = await new OAuthClient(config).RequestToken(refreshRequest);
             double tokenRefreshDurationMs = Stopwatch.GetElapsedTime(tokenRefreshStart).TotalMilliseconds;
             HomeLinkTelemetry.SpotifyTokenRefreshDurationMs.Record(
@@ -307,7 +306,7 @@ public class SpotifyService
             }
 
             // First, if we have cached info and the song hasn't ended yet, return the locally advanced value
-            if (cached != null && cached.IsPlaying)
+            if (cached is { IsPlaying: true })
             {
                 // Only trust optimistic cache for a short window to detect skips/pauses promptly.
                 if (cached.ProgressMs < cached.DurationMs && cacheAge <= MaxOptimisticCacheAge)
@@ -331,7 +330,7 @@ public class SpotifyService
                 // Access tokens can be invalidated before local expiry. Force a refresh and retry once.
                 _logger.LogWarning("Spotify currently-playing call returned 401 Unauthorized. Forcing token refresh and retrying once.");
                 string accessToken = await EnsureAccessTokenAsync(forceRefresh: true);
-                SpotifyClient refreshedClient = new SpotifyClient(SpotifyClientConfig.CreateDefault().WithToken(accessToken));
+                SpotifyClient refreshedClient = new(SpotifyClientConfig.CreateDefault().WithToken(accessToken));
                 _logger.LogInformation("Retrying Spotify currently-playing endpoint after forced token refresh.");
                 currentlyPlaying = await refreshedClient.Player.GetCurrentlyPlaying(new PlayerCurrentlyPlayingRequest());
                 _logger.LogInformation("Spotify currently-playing retry response received. HasItem: {HasItem}, IsPlaying: {IsPlaying}.", currentlyPlaying?.Item != null, currentlyPlaying?.IsPlaying);

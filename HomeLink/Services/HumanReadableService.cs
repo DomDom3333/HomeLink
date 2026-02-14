@@ -5,7 +5,7 @@ namespace HomeLink.Services;
 /// <summary>
 /// Service for generating human-readable location descriptions with friendly, varied phrases
 /// </summary>
-public class HumanReadableService
+public static class HumanReadableService
 {
     private static readonly Random Random = new();
 
@@ -14,7 +14,7 @@ public class HumanReadableService
     /// <summary>
     /// Creates a human-readable location text from LocationInfo with full context including movement.
     /// </summary>
-    public string CreateHumanReadableText(LocationInfo location)
+    public static string CreateHumanReadableText(LocationInfo location)
     {
         string baseText = CreateBaseLocationText(location);
         string movementContext = GetMovementContext(location.Velocity);
@@ -30,7 +30,7 @@ public class HumanReadableService
     /// <summary>
     /// Creates a human-readable location text from Nominatim address.
     /// </summary>
-    public string CreateHumanReadableText(NominatimAddress? address, LocationInfo? location = null)
+    public static string CreateHumanReadableText(NominatimAddress? address, LocationInfo? location = null)
     {
         string baseText = CreateBaseLocationText(address);
         
@@ -50,14 +50,14 @@ public class HumanReadableService
     /// <summary>
     /// Creates human-readable text for a known location, adding movement context if applicable.
     /// </summary>
-    public string CreateHumanReadableTextForKnownLocation(LocationInfo location)
+    public static string CreateHumanReadableTextForKnownLocation(LocationInfo location)
     {
         KnownLocation? knownLocation = location.MatchedKnownLocation;
         if (knownLocation == null)
             return CreateHumanReadableText(location);
         
         // If moving at significant speed, they might be leaving/arriving
-        if (location.Velocity.HasValue && location.Velocity.Value > 5)
+        if (location.Velocity is > 5)
         {
             // Moving while at a known location - likely arriving or leaving
             if (location.Velocity.Value > 30)
@@ -98,10 +98,9 @@ public class HumanReadableService
         {
             < 6 => PickRandom(WalkingPhrases),           // 2-5 km/h - walking pace
             < 15 => PickRandom(StrollingPhrases),        // 6-14 km/h - brisk walk or slow bike
-            < 25 => PickRandom(CyclingPhrases),          // 15-24 km/h - typical cycling speed
-            < 50 => PickRandom(CityTravelPhrases),       // 25-49 km/h - city driving or fast cycling
+            < 50 => PickRandom(CityTravelPhrases),       // 15-49 km/h - city driving
             < 90 => PickRandom(DrivingPhrases),          // 50-89 km/h - highway driving
-            < 150 => PickRandom(FastDrivingPhrases),     // 90-149 km/h - fast highway
+            < 150 => PickRandom(HighwayPhrases),         // 90-149 km/h - fast highway
             < 300 => PickRandom(TrainPhrases),           // 150-299 km/h - high-speed train
             _ => PickRandom(FlyingPhrases)               // 300+ km/h - airplane
         };
@@ -128,16 +127,6 @@ public class HumanReadableService
         "Power walking"
     ];
 
-    private static readonly string[] CyclingPhrases =
-    [
-        "Cycling",
-        "On the bike",
-        "Pedaling along",
-        "Biking through",
-        "On two wheels",
-        "Cruising by bike"
-    ];
-
     private static readonly string[] CityTravelPhrases =
     [
         "Traveling through",
@@ -158,7 +147,7 @@ public class HumanReadableService
         "Motoring along"
     ];
 
-    private static readonly string[] FastDrivingPhrases =
+    private static readonly string[] HighwayPhrases =
     [
         "Speeding along",
         "Flying down the road",

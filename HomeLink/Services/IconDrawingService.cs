@@ -27,12 +27,12 @@ public class IconDrawingService
             if (isPlaying)
             {
                 // Draw Play Triangle
-                PointF[] points = new PointF[]
-                {
+                PointF[] points =
+                [
                     new(x, y),
                     new(x + size, y + size / 2f),
                     new(x, y + size)
-                };
+                ];
                 ctx.FillPolygon(_noAaOptions, color, points);
             }
             else
@@ -114,15 +114,15 @@ public class IconDrawingService
                 int boltBottom = y + height - 2;
                 float boltW = Math.Max(2f, bodyWidth * 0.20f);
                 float boltMidY = (boltTop + boltBottom) / 2f;
-                PointF[] boltPoints = new PointF[]
-                {
+                PointF[] boltPoints =
+                [
                     new(boltCenterX - boltW * 0.3f, boltTop),
                     new(boltCenterX + boltW * 0.5f, boltTop),
                     new(boltCenterX - boltW * 0.2f, boltMidY),
                     new(boltCenterX + boltW * 0.4f, boltMidY),
                     new(boltCenterX - boltW * 0.7f, boltBottom),
                     new(boltCenterX - boltW * 0.3f, boltMidY)
-                };
+                ];
                 ctx.FillPolygon(_noAaOptions, Color.Black, boltPoints);
             }
         });

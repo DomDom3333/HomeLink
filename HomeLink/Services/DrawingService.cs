@@ -140,7 +140,7 @@ public class DrawingService
         RecordDrawingStage("static_draw", staticStart);
         await DrawDynamicContentAsync(image, spotifyData, locationData);
 
-        using MemoryStream ms = new MemoryStream();
+        using MemoryStream ms = new();
         
         long ditherPackStart = Stopwatch.GetTimestamp();
         if (dither)
@@ -172,9 +172,9 @@ public class DrawingService
         Font tinyFont = _fontFamily.CreateFont(13);
 
         Color black = Color.Black;
-        Color darkGray = new Color(new Rgba32(64, 64, 64));
-        Color mediumGray = new Color(new Rgba32(100, 100, 100));
-        Color lightGray = new Color(new Rgba32(160, 160, 160));
+        Color darkGray = new(new Rgba32(64, 64, 64));
+        Color mediumGray = new(new Rgba32(100, 100, 100));
+        Color lightGray = new(new Rgba32(160, 160, 160));
 
         // Calculate layout zones
         int leftColumnWidth = AlbumArtSize + Margin * 2;
@@ -200,17 +200,20 @@ public class DrawingService
 
             // Track Title
             string trackText = TextUtils.TruncateText(spotifyData.Title, 30);
-            image.Mutate(ctx => ctx.DrawText(_noAaOptions, trackText, titleFont, black, new PointF(centerX, yPos)));
+            int pos = yPos;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, trackText, titleFont, black, new PointF(centerX, pos)));
             yPos += 45;
 
             // Artist
             string artistText = TextUtils.TruncateText(spotifyData.Artist, 35);
-            image.Mutate(ctx => ctx.DrawText(_noAaOptions, artistText, largeFont, darkGray, new PointF(centerX, yPos)));
+            int pos1 = yPos;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, artistText, largeFont, darkGray, new PointF(centerX, pos1)));
             yPos += 35;
 
             // Album
             string albumText = TextUtils.TruncateText(spotifyData.Album, 40);
-            image.Mutate(ctx => ctx.DrawText(_noAaOptions, albumText, font, mediumGray, new PointF(centerX, yPos)));
+            int yPos1 = yPos;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, albumText, font, mediumGray, new PointF(centerX, yPos1)));
             yPos += 35;
 
             // Progress bar
@@ -263,9 +266,10 @@ public class DrawingService
             image.Mutate(ctx => ctx.DrawText(_noAaOptions, "CURRENT LOCATION", smallBoldFont, darkGray, new PointF(infoX, bottomY)));
 
             // Primary location name
+            string locationDataDisplayName = !string.IsNullOrEmpty(locationData.DisplayName) ? locationData.DisplayName : "Unknown Location";
             string locationText = !string.IsNullOrEmpty(locationData.HumanReadable)
                 ? locationData.HumanReadable
-                : (!string.IsNullOrEmpty(locationData.DisplayName) ? locationData.DisplayName : "Unknown Location");
+                : locationDataDisplayName;
             locationText = TextUtils.TruncateText(locationText, 35);
             image.Mutate(ctx => ctx.DrawText(_noAaOptions, locationText, largeFont, black, new PointF(infoX, bottomY + 22)));
 
@@ -394,7 +398,7 @@ public class DrawingService
     private async Task DrawDynamicContentAsync(Image<L8> image, SpotifyTrackInfo? spotifyData, LocationInfo? locationData)
     {
         Font font = _fontFamily.CreateFont(20);
-        Color mediumGray = new Color(new Rgba32(100, 100, 100));
+        Color mediumGray = new(new Rgba32(100, 100, 100));
         int topSectionHeight = 290;
         int bottomY = topSectionHeight + Margin;
         int mapSize = 180;
@@ -448,14 +452,15 @@ public class DrawingService
             nextX += batteryWidth + 6;
 
             string percentText = $"{locationData.BatteryLevel}%";
-            image.Mutate(ctx => ctx.DrawText(_noAaOptions, percentText, font, color, new PointF(nextX, y)));
+            int x = nextX;
+            image.Mutate(ctx => ctx.DrawText(_noAaOptions, percentText, font, color, new PointF(x, y)));
             nextX += percentText.Length * 8 + 12;
         }
 
         if (locationData.Accuracy.HasValue)
             otherStatusParts.Add($"±{locationData.Accuracy}m");
         
-        if (locationData.Velocity.HasValue && locationData.Velocity.Value > 0)
+        if (locationData.Velocity is > 0)
             otherStatusParts.Add($"{locationData.Velocity} km/h");
         
         if (!string.IsNullOrEmpty(locationData.Connection))

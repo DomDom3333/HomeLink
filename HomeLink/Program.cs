@@ -7,7 +7,7 @@ using Microsoft.AspNetCore.HttpLogging;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
-using HomeLink.Telemetry;
+using Telemetry;
 
 public static class Program
 {
@@ -186,9 +186,8 @@ public static class Program
         }
 
         string value = input.Trim().ToLowerInvariant();
-        double scalar;
 
-        if (value.EndsWith("ms") && double.TryParse(value[..^2], NumberStyles.Float, CultureInfo.InvariantCulture, out scalar))
+        if (value.EndsWith("ms") && double.TryParse(value[..^2], NumberStyles.Float, CultureInfo.InvariantCulture, out double scalar))
         {
             return TimeSpan.FromMilliseconds(scalar);
         }

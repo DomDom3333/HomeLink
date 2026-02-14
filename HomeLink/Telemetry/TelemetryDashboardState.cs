@@ -5,8 +5,8 @@ using System.Collections.Concurrent;
 
 public class TelemetryDashboardState
 {
-    private static readonly TimeSpan CorrelationWindow15m = TimeSpan.FromMinutes(15);
-    private static readonly TimeSpan CorrelationWindow1h = TimeSpan.FromHours(1);
+    private static readonly TimeSpan CorrelationWindow15M = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan CorrelationWindow1H = TimeSpan.FromHours(1);
     private static readonly TimeSpan OneHour = TimeSpan.FromHours(1);
     private static readonly TimeSpan OneDay = TimeSpan.FromDays(1);
     private static readonly TimeSpan LatencyBucketSize = TimeSpan.FromSeconds(30);
@@ -15,8 +15,8 @@ public class TelemetryDashboardState
     private const int MaxBatteryHistorySamples = 120_000;
     private static readonly TimeSpan MinimumPredictionWindow = TimeSpan.FromHours(1);
 
-    private readonly object _timelineLock = new();
-    private readonly object _latencyLock = new();
+    private readonly Lock _timelineLock = new();
+    private readonly Lock _latencyLock = new();
     private readonly Queue<DateTimeOffset> _displayRequestTimeline = new();
     private readonly Queue<DeviceBatterySample> _batteryHistory = new();
     private readonly Queue<LatencyBucketAccumulator> _displayLatencyBuckets = new();
@@ -133,8 +133,8 @@ public class TelemetryDashboardState
             resolvedOptions.Window,
             resolvedOptions.Resolution,
             resolvedOptions.MaxPoints);
-        TelemetryCorrelationResult correlation15m = CalculateCpuToDisplayLatencyCorrelation(runtime.History, CorrelationWindow15m);
-        TelemetryCorrelationResult correlation1h = CalculateCpuToDisplayLatencyCorrelation(runtime.History, CorrelationWindow1h);
+        TelemetryCorrelationResult correlation15M = CalculateCpuToDisplayLatencyCorrelation(runtime.History, CorrelationWindow15M);
+        TelemetryCorrelationResult correlation1H = CalculateCpuToDisplayLatencyCorrelation(runtime.History, CorrelationWindow1H);
 
         return new TelemetryDashboardSnapshot
         {
@@ -149,8 +149,8 @@ public class TelemetryDashboardState
             Device = device,
             Runtime = runtime,
             TimeSeries = CreateTimeSeriesSection(resolvedOptions),
-            CpuToDisplayLatencyCorrelation15m = correlation15m,
-            CpuToDisplayLatencyCorrelation1h = correlation1h
+            CpuToDisplayLatencyCorrelation15M = correlation15M,
+            CpuToDisplayLatencyCorrelation1H = correlation1H
         };
     }
 
@@ -456,10 +456,19 @@ public class TelemetryDashboardState
 
     private WorkerQueueTelemetryAccumulator GetWorkerQueueAccumulator(string queue, string worker)
     {
-        return _workerQueues.GetOrAdd($"{queue}:{worker}", _ => new WorkerQueueTelemetryAccumulator(queue, worker));
+        // Avoid capturing `queue` and `worker` in a lambda (which creates a closure allocation).
+        // Build a composite key and use a static value factory that parses it so no outer variables are captured.
+        string key = $"{queue}:{worker}";
+        return _workerQueues.GetOrAdd(key, static k =>
+        {
+            int idx = k.IndexOf(':');
+            string q = idx >= 0 ? k[..idx] : k;
+            string w = idx >= 0 && idx + 1 < k.Length ? k[(idx + 1)..] : string.Empty;
+            return new WorkerQueueTelemetryAccumulator(q, w);
+        });
     }
 
-    private List<StageTelemetrySnapshot> CreateStageSnapshot(ConcurrentDictionary<string, StageTelemetryAccumulator> source)
+    private static List<StageTelemetrySnapshot> CreateStageSnapshot(ConcurrentDictionary<string, StageTelemetryAccumulator> source)
     {
         return source
             .OrderBy(entry => entry.Key)
@@ -634,13 +643,13 @@ public class TelemetryDashboardSnapshot
 
     public TelemetryTimeSeriesSection TimeSeries { get; set; } = new();
 
-    public TelemetryCorrelationResult CpuToDisplayLatencyCorrelation15m { get; set; } = TelemetryCorrelationResult.Empty(CorrelationWindowSeconds15m);
+    public TelemetryCorrelationResult CpuToDisplayLatencyCorrelation15M { get; set; } = TelemetryCorrelationResult.Empty(CorrelationWindowSeconds15M);
 
-    public TelemetryCorrelationResult CpuToDisplayLatencyCorrelation1h { get; set; } = TelemetryCorrelationResult.Empty(CorrelationWindowSeconds1h);
+    public TelemetryCorrelationResult CpuToDisplayLatencyCorrelation1H { get; set; } = TelemetryCorrelationResult.Empty(CorrelationWindowSeconds1H);
 
-    private const int CorrelationWindowSeconds15m = 900;
+    private const int CorrelationWindowSeconds15M = 900;
 
-    private const int CorrelationWindowSeconds1h = 3600;
+    private const int CorrelationWindowSeconds1H = 3600;
 }
 
 public class TelemetryCorrelationResult
@@ -1023,13 +1032,13 @@ public class DeviceTelemetrySection
 
 public class DeviceBatterySample
 {
-    public DateTimeOffset TimestampUtc { get; set; }
+    public DateTimeOffset TimestampUtc { get; init; }
 
-    public int? BatteryPercent { get; set; }
+    public int? BatteryPercent { get; init; }
 
-    public int? PredictedBatteryPercent { get; set; }
+    public int? PredictedBatteryPercent { get; init; }
 
-    public double? PredictedHoursToEmpty { get; set; }
+    public double? PredictedHoursToEmpty { get; init; }
 }
 
 public record BatteryPrediction(int? NextHourBatteryPercent, double? HoursToEmpty);
@@ -1038,14 +1047,14 @@ public class RuntimeTelemetrySection
 {
     public RuntimeTelemetryPoint? Latest { get; set; }
 
-    public List<RuntimeTelemetryPoint> History { get; set; } = new();
+    public List<RuntimeTelemetryPoint> History { get; init; } = [];
 }
 
 public class RuntimeTelemetryPoint
 {
-    public DateTimeOffset TimestampUtc { get; set; }
+    public DateTimeOffset TimestampUtc { get; init; }
 
-    public double ProcessCpuPercent { get; set; }
+    public double ProcessCpuPercent { get; init; }
 
     public double WorkingSetMb { get; set; }
 

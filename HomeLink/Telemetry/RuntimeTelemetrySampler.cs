@@ -7,7 +7,7 @@ public class RuntimeTelemetrySampler : IHostedService, IDisposable
     private static readonly TimeSpan SampleInterval = TimeSpan.FromSeconds(5);
     private const int MaxHistoryPoints = 240;
 
-    private readonly object _historyLock = new();
+    private readonly Lock _historyLock = new();
     private readonly Queue<RuntimeTelemetryPoint> _history = new();
     private readonly Process _process;
     private Timer? _timer;
@@ -111,8 +111,15 @@ public class RuntimeTelemetrySampler : IHostedService, IDisposable
 
     public void Dispose()
     {
-        _timer?.Dispose();
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+    protected virtual void Dispose(bool disposing)
+    {
+        if (!disposing) return;
+        // Cleanup
         _process.Dispose();
+        _timer?.Dispose();
     }
 
     private void Sample()

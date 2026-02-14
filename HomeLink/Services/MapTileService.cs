@@ -59,7 +59,7 @@ public class MapTileService
                         // Use OSM tile server (be respectful of usage policy)
                         string tileUrl = $"https://tile.openstreetmap.org/{zoom}/{currentTileX}/{currentTileY}.png";
                         
-                        using HttpRequestMessage request = new HttpRequestMessage(HttpMethod.Get, tileUrl);
+                        using HttpRequestMessage request = new(HttpMethod.Get, tileUrl);
                         request.Headers.Add("User-Agent", "HomeLink/1.0 (E-Ink Display Application)");
                         
                         HttpResponseMessage response = await _httpClient.SendAsync(request);
@@ -146,8 +146,8 @@ public class MapTileService
     /// </summary>
     public void DrawMapPlaceholder(Image<L8> image, int x, int y, int size, double lat, double lon)
     {
-        Color lightGray = new Color(new Rgba32(200, 200, 200));
-        Color mediumGray = new Color(new Rgba32(150, 150, 150));
+        Color lightGray = new(new Rgba32(200, 200, 200));
+        Color mediumGray = new(new Rgba32(150, 150, 150));
         Font font = _fontFamily.CreateFont(10);
 
         image.Mutate(ctx =>

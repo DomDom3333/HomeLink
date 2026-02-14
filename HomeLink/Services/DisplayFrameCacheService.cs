@@ -4,7 +4,7 @@ namespace HomeLink.Services;
 
 public sealed class DisplayFrameCacheService
 {
-    private readonly object _sync = new();
+    private readonly Lock _sync = new();
     private readonly SemaphoreSlim _renderSignal = new(0, int.MaxValue);
 
     private DisplayFrameSnapshot? _latestFrame;
@@ -70,7 +70,7 @@ public sealed class DisplayFrameCacheService
         try
         {
             await _renderSignal.WaitAsync(interval, cancellationToken);
-            while (_renderSignal.Wait(0))
+            while (await _renderSignal.WaitAsync(0, cancellationToken))
             {
                 // coalesce pending signals into a single wake-up
             }
@@ -103,7 +103,7 @@ public sealed class DisplayFrameCacheService
 
 public sealed class DisplayFrameSnapshot
 {
-    public byte[] FrameBytes { get; init; } = Array.Empty<byte>();
+    public byte[] FrameBytes { get; init; } = [];
 
     public int Width { get; init; }
 

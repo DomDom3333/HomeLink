@@ -11,10 +11,10 @@ namespace HomeLink.Services;
 public class ImageDitheringService
 {
     // Floyd-Steinberg coefficients
-    private const float Coeff7_16 = 7f / 16f;
-    private const float Coeff3_16 = 3f / 16f;
-    private const float Coeff5_16 = 5f / 16f;
-    private const float Coeff1_16 = 1f / 16f;
+    private const float Coeff716 = 7f / 16f;
+    private const float Coeff316 = 3f / 16f;
+    private const float Coeff516 = 5f / 16f;
+    private const float Coeff116 = 1f / 16f;
 
     // Auto-tune settings (reasonable defaults for e-paper)
     private const float LowPercent = 0.01f;   // 1%
@@ -67,13 +67,13 @@ public class ImageDitheringService
 
                         row[x] = new L8(quantized);
 
-                        if (x + 1 < width) currentRowError[x + 1] += error * Coeff7_16;
+                        if (x + 1 < width) currentRowError[x + 1] += error * Coeff716;
 
                         if (hasNextRow)
                         {
-                            if (x > 0) nextRowError[x - 1] += error * Coeff3_16;
-                            nextRowError[x] += error * Coeff5_16;
-                            if (x + 1 < width) nextRowError[x + 1] += error * Coeff1_16;
+                            if (x > 0) nextRowError[x - 1] += error * Coeff316;
+                            nextRowError[x] += error * Coeff516;
+                            if (x + 1 < width) nextRowError[x + 1] += error * Coeff116;
                         }
                     }
                 }
@@ -89,13 +89,13 @@ public class ImageDitheringService
 
                         row[x] = new L8(quantized);
 
-                        if (x - 1 >= 0) currentRowError[x - 1] += error * Coeff7_16;
+                        if (x - 1 >= 0) currentRowError[x - 1] += error * Coeff716;
 
                         if (hasNextRow)
                         {
-                            if (x + 1 < width) nextRowError[x + 1] += error * Coeff3_16;
-                            nextRowError[x] += error * Coeff5_16;
-                            if (x - 1 >= 0) nextRowError[x - 1] += error * Coeff1_16;
+                            if (x + 1 < width) nextRowError[x + 1] += error * Coeff316;
+                            nextRowError[x] += error * Coeff516;
+                            if (x - 1 >= 0) nextRowError[x - 1] += error * Coeff116;
                         }
                     }
                 }
@@ -248,8 +248,8 @@ public class ImageDitheringService
             for (int y = 0; y < image.Height; y++)
             {
                 ReadOnlySpan<L8> row = accessor.GetRowSpan(y);
-                for (int x = 0; x < row.Length; x++)
-                    hist[row[x].PackedValue]++;
+                foreach (L8 t in row)
+                    hist[t.PackedValue]++;
             }
         });
 

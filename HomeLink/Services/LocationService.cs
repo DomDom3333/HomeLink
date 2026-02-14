@@ -9,7 +9,6 @@ namespace HomeLink.Services;
 public class LocationService
 {
     private readonly HttpClient _httpClient;
-    private readonly HumanReadableService _humanReadableService;
     private readonly StatePersistenceService _statePersistenceService;
     private readonly TelemetryDashboardState _dashboardState;
     private readonly List<KnownLocation> _knownLocations = new();
@@ -23,7 +22,6 @@ public class LocationService
     {
         _httpClient = httpClient;
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("HomeLink/1.0");
-        _humanReadableService = new HumanReadableService();
         _statePersistenceService = statePersistenceService;
         _dashboardState = dashboardState;
 
@@ -109,7 +107,7 @@ public class LocationService
         _cachedLocation = location;
     }
 
-    private void ApplyOwnTracksMetadata(LocationInfo location, OwnTracksMetadata? metadata)
+    private static void ApplyOwnTracksMetadata(LocationInfo location, OwnTracksMetadata? metadata)
     {
         if (metadata == null)
             return;
@@ -123,14 +121,7 @@ public class LocationService
         location.TrackerId = metadata.TrackerId;
         location.Timestamp = metadata.Timestamp;
 
-        if (location.MatchedKnownLocation == null)
-        {
-            location.HumanReadable = _humanReadableService.CreateHumanReadableText(location);
-        }
-        else
-        {
-            location.HumanReadable = _humanReadableService.CreateHumanReadableTextForKnownLocation(location);
-        }
+        location.HumanReadable = location.MatchedKnownLocation == null ? HumanReadableService.CreateHumanReadableText(location) : HumanReadableService.CreateHumanReadableTextForKnownLocation(location);
     }
 
     #endregion
@@ -270,11 +261,11 @@ public class LocationService
             NominatimAddress? address = nominatimResponse.Address;
             
             // Generate Google Maps URL and QR code
-            string mapsLabel = knownLocation?.DisplayText ?? _humanReadableService.CreateHumanReadableText(address);
+            string mapsLabel = knownLocation?.DisplayText ?? HumanReadableService.CreateHumanReadableText(address);
             string googleMapsUrl = GenerateGoogleMapsUrl(latitude, longitude, mapsLabel);
             string qrCodeUrl = GenerateQrCodeUrl(googleMapsUrl);
             
-            LocationInfo locationInfo = new LocationInfo
+            LocationInfo locationInfo = new()
             {
                 Latitude = latitude,
                 Longitude = longitude,
@@ -292,7 +283,7 @@ public class LocationService
             // Generate human readable text (will be updated with velocity context when metadata is applied)
             locationInfo.HumanReadable = knownLocation != null 
                 ? knownLocation.DisplayText 
-                : _humanReadableService.CreateHumanReadableText(address, locationInfo);
+                : HumanReadableService.CreateHumanReadableText(address, locationInfo);
 
             return locationInfo;
         }
@@ -336,7 +327,7 @@ public class LocationService
         if (string.IsNullOrWhiteSpace(env))
             return;
 
-        string[] entries = env.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+        string[] entries = env.Split([';'], StringSplitOptions.RemoveEmptyEntries);
         foreach (string rawEntry in entries)
         {
             string entry = rawEntry.Trim();
