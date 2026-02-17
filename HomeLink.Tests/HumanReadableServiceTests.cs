@@ -47,7 +47,7 @@ public class HumanReadableServiceTests
 
         string result = HumanReadableService.CreateHumanReadableText(location);
 
-        Assert.False(result.StartsWith("In ", StringComparison.Ordinal));
+        Assert.Matches("^(Traveling through|Making my way through|Passing through|On the road|In transit|Cruising through) ", result);
         Assert.True(
             result.Contains("vienna", StringComparison.OrdinalIgnoreCase) ||
             result.Contains("leopoldstadt", StringComparison.OrdinalIgnoreCase) ||
