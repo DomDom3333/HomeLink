@@ -113,6 +113,9 @@ public static class Program
 
         builder.Services.AddHttpClient<Services.DrawingService>();
         builder.Services.AddScoped<Services.DrawingService>();
+
+        builder.Services.AddHttpClient<Services.IcalService>();
+        builder.Services.AddSingleton<Services.IcalService>();
         builder.Services.AddScoped<Services.DisplayDataService>();
         builder.Services.AddSingleton<Services.DisplayFrameCacheService>();
         builder.Services.AddHostedService<Services.DisplayRenderWorker>();
