@@ -10,15 +10,16 @@ HomeLink is an ASP.NET Core Web API that renders a composite image for a **LilyG
 2. [Project Structure](#project-structure)
 3. [Prerequisites](#prerequisites)
 4. [Spotify Setup — Getting a Refresh Token](#spotify-setup--getting-a-refresh-token)
-5. [Configuration Reference](#configuration-reference)
-6. [Running Locally](#running-locally)
-7. [Docker](#docker)
-8. [API Reference](#api-reference)
-9. [Display Rendering Pipeline](#display-rendering-pipeline)
-10. [Known Locations](#known-locations)
-11. [Observability](#observability)
-12. [Extending and Modifying](#extending-and-modifying)
-13. [Troubleshooting](#troubleshooting)
+5. [OwnTracks Setup](#owntracks-setup)
+6. [Configuration Reference](#configuration-reference)
+7. [Running Locally](#running-locally)
+8. [Docker](#docker)
+9. [API Reference](#api-reference)
+10. [Display Rendering Pipeline](#display-rendering-pipeline)
+11. [Known Locations](#known-locations)
+12. [Observability](#observability)
+13. [Extending and Modifying](#extending-and-modifying)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -212,6 +213,93 @@ Invoke-RestMethod -Method Post `
 The response JSON contains `refresh_token` — save it. This is your `SPOTIFY_REFRESH_TOKEN`.
 
 > **Note:** Authorization codes expire in **10 minutes** and are single-use. If the exchange fails, go back to Step 2 and get a fresh code.
+
+---
+
+## OwnTracks Setup
+
+[OwnTracks](https://github.com/owntracks/owntracks) is a free, open-source location-sharing app for iOS and Android. It POSTs your GPS coordinates to a URL of your choice — in this case, HomeLink's `/api/location/owntracks` endpoint. No cloud service is required; everything stays on your own infrastructure.
+
+---
+
+### 1. Install OwnTracks
+
+| Platform | Store link |
+|---|---|
+| **Android** | [Google Play — OwnTracks](https://play.google.com/store/apps/details?id=org.owntracks.android) |
+| **iOS** | [App Store — OwnTracks](https://apps.apple.com/app/owntracks/id692792motivate) |
+
+> OwnTracks is also available as an [APK direct download](https://github.com/owntracks/android/releases) from its GitHub releases page if you prefer to sideload.
+
+---
+
+### 2. Choose a connection mode
+
+OwnTracks supports two transport modes. **HTTP mode** is the simplest and is what HomeLink expects.
+
+| Mode | How it works | When to use |
+|---|---|---|
+| **HTTP** | POSTs a JSON payload directly to your URL. | Recommended — simple, no broker needed. |
+| **MQTT** | Publishes to an MQTT broker topic. | If you already run an MQTT broker (e.g. Mosquitto). |
+
+HomeLink's `POST /api/location/owntracks` endpoint is compatible with the OwnTracks HTTP mode payload format.
+
+---
+
+### 3. Configure HTTP mode (recommended)
+
+1. Open OwnTracks on your phone.
+2. Tap the **⋮ menu → Preferences → Connection**.
+3. Set **Mode** to **HTTP**.
+4. Fill in the fields:
+
+| Field | Value |
+|---|---|
+| **Host** | Your HomeLink server URL — e.g. `http://192.168.1.100:5119` or your public domain |
+| **Path** | `/api/location/owntracks` |
+| **Identification → Device ID** | Any short string, e.g. `phone` (becomes the `tid` field) |
+| **Identification → Tracker ID** | 2-character ID shown on the display, e.g. `ph` |
+
+5. Tap the **↑ upload** button (or move around to trigger a location publish) and watch HomeLink's logs for an incoming `OwnTracks location updated` message.
+
+> **Tip:** If HomeLink is running behind a router, either forward port `5119` from your router to your server, or run it on a VPS/cloud VM with a public IP. OwnTracks on mobile data cannot reach a purely local IP unless you use a VPN (e.g. WireGuard, Tailscale).
+
+---
+
+### 4. Tune reporting frequency
+
+In **Preferences → Reporting**, adjust how aggressively OwnTracks sends updates:
+
+| Setting | Recommended value | Notes |
+|---|---|---|
+| **Monitoring mode** | *Significant* or *Move* | *Significant* saves battery; *Move* gives more frequent updates while moving. |
+| **Ignore inaccurate locations** | `50` m or higher | Filters out low-quality GPS fixes. |
+| **Locator interval** (Move mode) | `30`–`60` s | How often to check location in Move mode. |
+
+The e-ink display refreshes on its own schedule (`DisplayRender:PlayingPollIntervalSeconds`), so there is no need to push more often than once every 30–60 seconds.
+
+---
+
+### 5. Verify the connection
+
+After saving settings, trigger a manual publish:
+
+- **Android:** tap **⋮ → Send location now**
+- **iOS:** tap **↑ (publish)** on the map screen
+
+Then confirm in HomeLink's logs:
+
+```
+info: LocationService - OwnTracks location updated: lat=48.2082, lon=16.3738
+```
+
+You can also call the `/api/display/image` endpoint in a browser to see the updated location reflected on the preview render.
+
+---
+
+### 6. (Optional) MQTT mode
+
+If you prefer MQTT, run an MQTT broker (e.g. [Eclipse Mosquitto](https://mosquitto.org/)) and point OwnTracks at it. You will need to adapt HomeLink's `LocationController` to subscribe to the broker topic instead of receiving HTTP POSTs — this is an architectural change not covered here.
 
 ---
 
