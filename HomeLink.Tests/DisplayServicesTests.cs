@@ -35,7 +35,7 @@ public class DisplayServicesTests
         Assert.EndsWith("...", result.Spotify.TitleDisplay);
 
         Assert.NotNull(result.Location);
-        Assert.Equal("GPS: 48,20820, 16,37380", result.Location!.CoordinatesText);
+        Assert.Equal("GPS: 48.20820, 16.37380", result.Location!.CoordinatesText);
         Assert.Equal("WiFi", result.Location.DeviceStatus.StatusParts[2]);
         Assert.Equal(16, result.Location.Map.Zoom);
         Assert.Equal(256, result.Location.Map.TileSize);

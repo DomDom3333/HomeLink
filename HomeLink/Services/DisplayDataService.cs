@@ -1,3 +1,4 @@
+using System.Globalization;
 using HomeLink.Models;
 using HomeLink.Utils;
 
@@ -68,7 +69,7 @@ public class DisplayDataService
             LocationText = locationText,
             LocationDisplayText = TextUtils.TruncateText(locationText, 35),
             CityCountryText = TextUtils.BuildCityCountryString(locationData),
-            CoordinatesText = $"GPS: {locationData.Latitude:F5}, {locationData.Longitude:F5}",
+            CoordinatesText = $"GPS: {locationData.Latitude.ToString("F5", CultureInfo.InvariantCulture)}, {locationData.Longitude.ToString("F5", CultureInfo.InvariantCulture)}",
             GoogleMapsUrl = locationData.GoogleMapsUrl,
             QrCodeUrl = locationData.QrCodeUrl,
             MatchedKnownLocation = locationData.MatchedKnownLocation,
