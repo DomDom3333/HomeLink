@@ -24,7 +24,7 @@ public class SpotifyService
     private DateTime _lastSyncUtc = DateTime.MinValue;
     private static readonly TimeSpan MaxOptimisticCacheAge = TimeSpan.FromSeconds(15);
 
-    public SpotifyService(ILogger<SpotifyService> logger, TelemetryDashboardState dashboardState, StatePersistenceService statePersistenceService, string? clientId, string? clientSecret, string? refreshToken = null, DateTime? expiry = null)
+    public SpotifyService(ILogger<SpotifyService> logger, TelemetryDashboardState dashboardState, StatePersistenceService statePersistenceService, string? clientId, string? clientSecret, string? refreshToken = null)
     {
         _logger = logger;
         _dashboardState = dashboardState;
@@ -33,12 +33,12 @@ public class SpotifyService
         _clientSecret = string.IsNullOrWhiteSpace(clientSecret) ? null : clientSecret;
 
         // If tokens are provided (for example from env vars), initialize them here
-        if (!string.IsNullOrEmpty(refreshToken) || expiry.HasValue)
+        if (!string.IsNullOrEmpty(refreshToken))
         {
             lock (_tokenLock)
             {
                 _refreshToken = refreshToken;
-                _tokenExpiry = expiry ?? DateTime.MinValue;
+                _tokenExpiry = DateTime.MinValue;
             }
         }
 

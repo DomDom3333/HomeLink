@@ -77,20 +77,6 @@ public static class Program
         string? spotifyClientId = Environment.GetEnvironmentVariable("SPOTIFY_ID");
         string? spotifyClientSecret = Environment.GetEnvironmentVariable("SPOTIFY_SECRET");
 
-        DateTime? spotifyTokenExpiry = null;
-        string? expiryEnv = Environment.GetEnvironmentVariable("SPOTIFY_TOKEN_EXPIRY");
-        if (expiryEnv != null)
-        {
-            if (DateTime.TryParse(expiryEnv, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTime parsed))
-            {
-                spotifyTokenExpiry = parsed.ToUniversalTime();
-            }
-            else if (long.TryParse(expiryEnv, out long unixSeconds))
-            {
-                spotifyTokenExpiry = DateTimeOffset.FromUnixTimeSeconds(unixSeconds).UtcDateTime;
-            }
-        }
-
         builder.Services.AddSingleton<RuntimeTelemetrySampler>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<RuntimeTelemetrySampler>());
         builder.Services.AddSingleton<TelemetryDashboardState>();
@@ -103,8 +89,7 @@ public static class Program
                 sp.GetRequiredService<Services.StatePersistenceService>(),
                 spotifyClientId,
                 spotifyClientSecret,
-                spotifyRefreshToken,
-                spotifyTokenExpiry));
+                spotifyRefreshToken));
 
         builder.Services.AddHttpClient<Services.LocationService>();
         builder.Services.AddSingleton<Services.LocationService>();
