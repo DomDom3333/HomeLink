@@ -8,18 +8,19 @@ HomeLink is an ASP.NET Core Web API that renders a composite image for a **LilyG
 
 1. [How it Works](#how-it-works)
 2. [Project Structure](#project-structure)
-3. [Prerequisites](#prerequisites)
-4. [Spotify Setup — Getting a Refresh Token](#spotify-setup--getting-a-refresh-token)
-5. [OwnTracks Setup](#owntracks-setup)
-6. [Configuration Reference](#configuration-reference)
-7. [Running Locally](#running-locally)
-8. [Docker](#docker)
-9. [API Reference](#api-reference)
-10. [Display Rendering Pipeline](#display-rendering-pipeline)
-11. [Known Locations](#known-locations)
-12. [Observability](#observability)
-13. [Extending and Modifying](#extending-and-modifying)
-14. [Troubleshooting](#troubleshooting)
+3. [Device Hardware & Firmware](HomeLink/Device/)
+4. [Prerequisites](#prerequisites)
+5. [Spotify Setup — Getting a Refresh Token](#spotify-setup--getting-a-refresh-token)
+6. [OwnTracks Setup](#owntracks-setup)
+7. [Configuration Reference](#configuration-reference)
+8. [Running Locally](#running-locally)
+9. [Docker](#docker)
+10. [API Reference](#api-reference)
+11. [Display Rendering Pipeline](#display-rendering-pipeline)
+12. [Known Locations](#known-locations)
+13. [Observability](#observability)
+14. [Extending and Modifying](#extending-and-modifying)
+15. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -109,7 +110,11 @@ HomeLink/
 ├── appsettings.Development.json  — Development overrides (verbose logging, Spotify redirect URI)
 ├── Properties/launchSettings.json— Local run profiles (port 5119/7239)
 ├── Dockerfile                    — Multi-stage Docker build (SDK → runtime, listens on 8080)
-└── HomeLink.http                 — HTTP request collection for manual testing
+├── HomeLink.http                 — HTTP request collection for manual testing
+│
+└── Device/                       — Hardware & firmware docs (see Hardware.md and Firmware.md)
+    ├── Hardware.md               — LilyGO T5 4.7″ wiring and component notes
+    └── Firmware.md               — Arduino/ESP32 firmware walkthrough
 ```
 
 ---
