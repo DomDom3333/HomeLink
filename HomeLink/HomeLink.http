@@ -1,0 +1,86 @@
+@HomeLink_HostAddress = http://localhost:5119
+
+### Health check
+GET {{HomeLink_HostAddress}}/health
+
+###
+
+### ── Display ─────────────────────────────────────────────
+
+### Render full display — returns raw 1bpp binary (application/octet-stream)
+GET {{HomeLink_HostAddress}}/api/display/render
+Accept: application/octet-stream
+
+###
+
+### Render full display — with dithering disabled and device battery hint
+GET {{HomeLink_HostAddress}}/api/display/render?dither=false&deviceBattery=42
+Accept: application/octet-stream
+
+###
+
+### Render display as PNG image (human-readable preview)
+GET {{HomeLink_HostAddress}}/api/display/image
+Accept: image/png
+
+###
+
+### Render display as PNG — dithering off, with battery indicator
+GET {{HomeLink_HostAddress}}/api/display/image?dither=false&deviceBattery=6
+Accept: image/png
+
+###
+
+### Render Spotify section only — returns JSON bitmap (useful for testing Spotify section)
+GET {{HomeLink_HostAddress}}/api/display/render-spotify-only
+Accept: application/json
+
+###
+
+### Render location section only — uses cached OwnTracks location, returns JSON bitmap
+### (send a POST /api/location/owntracks first if no location is cached)
+GET {{HomeLink_HostAddress}}/api/display/render-location-only
+Accept: application/json
+
+###
+
+### ── Location ─────────────────────────────────────────────
+
+### Receive OwnTracks location update (POST — used by OwnTracks app)
+POST {{HomeLink_HostAddress}}/api/location/owntracks
+Content-Type: application/json
+
+{
+  "_type": "location",
+  "lat": 48.2082,
+  "lon": 16.3738,
+  "acc": 10,
+  "alt": 180,
+  "batt": 85,
+  "bs": 1,
+  "vel": 0,
+  "tst": 1708560000,
+  "tid": "AB"
+}
+
+###
+
+### ── Telemetry ────────────────────────────────────────────
+
+### Telemetry summary (default window)
+GET {{HomeLink_HostAddress}}/api/telemetry/summary
+Accept: application/json
+
+###
+
+### Telemetry summary — last hour, 1-minute resolution, max 60 data points
+GET {{HomeLink_HostAddress}}/api/telemetry/summary?window=1h&resolution=1m&maxPoints=60
+Accept: application/json
+
+###
+
+### Telemetry dashboard (HTML page)
+GET {{HomeLink_HostAddress}}/telemetry/dashboard
+Accept: text/html
+
+###

@@ -4,23 +4,36 @@ HomeLink is an ASP.NET Core Web API that renders a composite image for a **LilyG
 
 ---
 
+## Gallery
+
+| Display — Playing (normal battery) | Display — Paused (low battery) |
+|:---:|:---:|
+| ![Display render: track playing, battery normal](HomelinkRenderedBatteryNormalPlaying.png) | ![Display render: track paused, battery empty](HomelinkRenderedBatteryEmptyPaused.png) |
+
+### Telemetry Dashboard
+
+![HomeLink Telemetry Dashboard](DashboardScreenshot.png)
+
+---
+
 ## Table of Contents
 
-1. [How it Works](#how-it-works)
-2. [Project Structure](#project-structure)
-3. [Device Hardware & Firmware](HomeLink/Device/)
-4. [Prerequisites](#prerequisites)
-5. [Spotify Setup — Getting a Refresh Token](#spotify-setup--getting-a-refresh-token)
-6. [OwnTracks Setup](#owntracks-setup)
-7. [Configuration Reference](#configuration-reference)
-8. [Running Locally](#running-locally)
-9. [Docker](#docker)
-10. [API Reference](#api-reference)
-11. [Display Rendering Pipeline](#display-rendering-pipeline)
-12. [Known Locations](#known-locations)
-13. [Observability](#observability)
-14. [Extending and Modifying](#extending-and-modifying)
-15. [Troubleshooting](#troubleshooting)
+1. [Gallery](#gallery)
+2. [How it Works](#how-it-works)
+3. [Project Structure](#project-structure)
+4. [Device Hardware & Firmware](HomeLink/Device/)
+5. [Prerequisites](#prerequisites)
+6. [Spotify Setup — Getting a Refresh Token](#spotify-setup--getting-a-refresh-token)
+7. [OwnTracks Setup](#owntracks-setup)
+8. [Configuration Reference](#configuration-reference)
+9. [Running Locally](#running-locally)
+10. [Docker](#docker)
+11. [API Reference](#api-reference)
+12. [Display Rendering Pipeline](#display-rendering-pipeline)
+13. [Known Locations](#known-locations)
+14. [Observability](#observability)
+15. [Extending and Modifying](#extending-and-modifying)
+16. [Troubleshooting](#troubleshooting)
 
 ---
 
