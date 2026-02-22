@@ -801,7 +801,16 @@ Any XYZ tile server works (Mapbox, Stadia, etc.) — just add your API key to th
 
 ## License
 
-This project includes third-party libraries:
+The application code is licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)**.
+
+- ✅ Free to use for personal, hobby, research, and non-commercial purposes.
+- ❌ **Commercial use and selling are not permitted.**
+
+See the [LICENSE](LICENSE) file for full terms.
+
+### Third-party libraries
+
+This project includes the following third-party libraries:
 
 - [SpotifyAPI.Web](https://github.com/JohnnyCrazy/SpotifyAPI-NET) — MIT
 - [SixLabors ImageSharp](https://github.com/SixLabors/ImageSharp) — Six Labors Split License
@@ -809,4 +818,4 @@ This project includes third-party libraries:
 - [QRCoder](https://github.com/codebude/QRCoder) — MIT
 - [OpenTelemetry .NET](https://github.com/open-telemetry/opentelemetry-dotnet) — Apache 2.0
 
-Consult each library's license before redistribution. The application code is intended for personal/home use.
+Consult each library's license before redistribution.
