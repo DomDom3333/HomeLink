@@ -24,7 +24,6 @@ public static class DisplayFrameHashService
             sb.Append($"title:{spotify.Title}|");
             sb.Append($"artist:{spotify.Artist}|");
             sb.Append($"album:{spotify.Album}|");
-            sb.Append($"coverUrl:{spotify.AlbumCoverUrl}|");
             sb.Append($"duration:{spotify.DurationMs}|");
             sb.Append($"uri:{spotify.SpotifyUri}|");
             sb.Append($"playing:{spotify.IsPlaying}|");
