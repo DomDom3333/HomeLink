@@ -1,4 +1,5 @@
 ﻿using HomeLink.Models;
+using HomeLink.Utils;
 
 namespace HomeLink.Services;
 
@@ -209,7 +210,7 @@ public static class HumanReadableService
         // Check if it's Vienna (Wien) - handle district format
         if (IsVienna(address))
         {
-            string? districtName = address.Suburb ?? address.CityDistrict ?? address.District;
+            string? districtName = TextUtils.SanitizeLocationName(address.Suburb ?? address.CityDistrict ?? address.District);
             return CreateViennaLocationText(districtName);
         }
 
@@ -220,8 +221,8 @@ public static class HumanReadableService
         }
 
         // Get locality and district
-        string? genericLocality = address.City ?? address.Town ?? address.Village ?? address.Municipality;
-        string? genericDistrict = address.Suburb ?? address.CityDistrict ?? address.District;
+        string? genericLocality = TextUtils.SanitizeLocationName(address.City ?? address.Town ?? address.Village ?? address.Municipality);
+        string? genericDistrict = TextUtils.SanitizeLocationName(address.Suburb ?? address.CityDistrict ?? address.District);
         
         return CreateGenericLocationText(genericDistrict, genericLocality, address.State, address.Country);
     }
@@ -231,8 +232,8 @@ public static class HumanReadableService
     /// </summary>
     private static string CreateAustrianLocationText(NominatimAddress address)
     {
-        string? locality = address.City ?? address.Town ?? address.Village ?? address.Municipality;
-        string? district = address.Suburb ?? address.CityDistrict ?? address.District;
+        string? locality = TextUtils.SanitizeLocationName(address.City ?? address.Town ?? address.Village ?? address.Municipality);
+        string? district = TextUtils.SanitizeLocationName(address.Suburb ?? address.CityDistrict ?? address.District);
         string? state = address.State;
 
         // Check for well-known Austrian cities

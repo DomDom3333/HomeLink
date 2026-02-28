@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Diagnostics;
 using HomeLink.Models;
 using HomeLink.Telemetry;
+using HomeLink.Utils;
 
 namespace HomeLink.Services;
 
@@ -270,11 +271,11 @@ public class LocationService
                 Latitude = latitude,
                 Longitude = longitude,
                 DisplayName = nominatimResponse.DisplayName ?? string.Empty,
-                District = address?.Suburb ?? address?.CityDistrict ?? address?.District,
-                City = address?.City,
-                Town = address?.Town,
-                Village = address?.Village,
-                Country = address?.Country,
+                District = TextUtils.SanitizeLocationName(address?.Suburb ?? address?.CityDistrict ?? address?.District),
+                City     = TextUtils.SanitizeLocationName(address?.City),
+                Town     = TextUtils.SanitizeLocationName(address?.Town),
+                Village  = TextUtils.SanitizeLocationName(address?.Village),
+                Country  = address?.Country,
                 MatchedKnownLocation = knownLocation,
                 GoogleMapsUrl = googleMapsUrl,
                 QrCodeUrl = qrCodeUrl

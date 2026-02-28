@@ -90,4 +90,32 @@ public class UtilsTests
         Assert.Equal(d1, d2, 8);
         Assert.InRange(d1, 140_000, 150_000);
     }
+
+    [Theory]
+    [InlineData("Katastralgemeinde Karlstetten", "Karlstetten")]
+    [InlineData("KATASTRALGEMEINDE Meidling", "Meidling")]           // case-insensitive
+    [InlineData("Katastralgemeinde Heinigstetten", "Heinigstetten")]
+    [InlineData("Marktgemeinde Korneuburg", "Korneuburg")]
+    [InlineData("Marktgemeinde Waidhofen", "Waidhofen")]
+    [InlineData("Stadtgemeinde Krems", "Krems")]
+    [InlineData("Stadtbezirk Mitte", "Mitte")]
+    [InlineData("Gerichtsbezirk Schwechat", "Schwechat")]
+    [InlineData("Verwaltungsgemeinschaft Altdorf", "Altdorf")]
+    [InlineData("Verbandsgemeinde Landau", "Landau")]
+    [InlineData("Samtgemeinde Ilmenau", "Ilmenau")]
+    [InlineData("Gemeinde Klosterneuburg", "Klosterneuburg")]
+    [InlineData("Ortschaft Grinzing", "Grinzing")]
+    [InlineData("Bezirk St. Pölten", "St. Pölten")]
+    [InlineData("Rotte Kirchberg", "Kirchberg")]
+    [InlineData("Weiler Almbachtal", "Almbachtal")]
+    [InlineData("Innere Stadt", "Innere Stadt")] // no prefix → unchanged
+    [InlineData("Leopoldstadt", "Leopoldstadt")] // no prefix → unchanged
+    [InlineData("Gemeinde", "Gemeinde")] // prefix with no trailing name → unchanged
+    [InlineData("Bezirksdorf", "Bezirksdorf")] // "Bezirksdorf" starts with "Bezirk" but has no space after – must not be stripped
+    [InlineData("", "")]
+    [InlineData(null, null)]
+    public void SanitizeLocationName_StripsAdministrativePrefixes(string? input, string? expected)
+    {
+        Assert.Equal(expected, TextUtils.SanitizeLocationName(input));
+    }
 }
