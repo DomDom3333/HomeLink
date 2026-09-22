@@ -19,6 +19,9 @@ public class SpotifyService
     private string? _accessToken;
     private string? _refreshToken;
     private DateTime _tokenExpiry = DateTime.MinValue;
+    private DateTime? _refreshTokenObtainedUtc;
+    private string? _lastRefreshError;
+    private DateTime? _lastRefreshErrorUtc;
     private SpotifyTrackInfo? _lastTrackInfo;
     // Track when we last synchronized with Spotify and the device-reported progress at that time
     private DateTime _lastSyncUtc = DateTime.MinValue;
@@ -40,6 +43,21 @@ public class SpotifyService
                 _refreshToken = refreshToken;
                 _tokenExpiry = DateTime.MinValue;
             }
+        }
+
+        // A token obtained through the in-app OAuth flow (or rotated by Spotify on a previous refresh)
+        // is newer than whatever the environment variable holds, so it wins.
+        (string RefreshToken, DateTime ObtainedUtc)? persistedToken = _statePersistenceService.LoadSpotifyRefreshTokenAsync().GetAwaiter().GetResult();
+        if (persistedToken.HasValue)
+        {
+            lock (_tokenLock)
+            {
+                _refreshToken = persistedToken.Value.RefreshToken;
+                _refreshTokenObtainedUtc = persistedToken.Value.ObtainedUtc == DateTime.MinValue ? null : persistedToken.Value.ObtainedUtc;
+                _tokenExpiry = DateTime.MinValue;
+            }
+
+            _logger.LogInformation("Loaded persisted Spotify refresh token (obtained {ObtainedUtc}).", persistedToken.Value.ObtainedUtc);
         }
 
         (SpotifyTrackInfo TrackInfo, DateTime LastSyncUtc)? persisted = _statePersistenceService.LoadSpotifyTrackAsync().GetAwaiter().GetResult();
@@ -64,6 +82,77 @@ public class SpotifyService
             {
                 return !string.IsNullOrEmpty(_refreshToken);
             }
+        }
+    }
+
+    /// <summary>
+    /// True when a client id and secret are configured, so the OAuth flow can be started.
+    /// </summary>
+    public bool IsConfigured => _clientId != null && _clientSecret != null;
+
+    public string? ClientId => _clientId;
+
+    /// <summary>
+    /// Snapshot of the current authorization state, for the dashboard and the status endpoint.
+    /// </summary>
+    public SpotifyAuthStatus GetAuthStatus()
+    {
+        lock (_tokenLock)
+        {
+            return new SpotifyAuthStatus
+            {
+                Configured = IsConfigured,
+                Authorized = !string.IsNullOrEmpty(_refreshToken),
+                RefreshTokenObtainedUtc = _refreshTokenObtainedUtc,
+                AccessTokenExpiresUtc = string.IsNullOrEmpty(_accessToken) ? null : _tokenExpiry,
+                LastRefreshError = _lastRefreshError,
+                LastRefreshErrorUtc = _lastRefreshErrorUtc
+            };
+        }
+    }
+
+    /// <summary>
+    /// Replaces the refresh token after a successful OAuth exchange and persists it so it survives restarts.
+    /// </summary>
+    public async Task SetRefreshTokenAsync(string refreshToken, DateTime obtainedUtc)
+    {
+        if (string.IsNullOrWhiteSpace(refreshToken))
+            throw new ArgumentException("Refresh token must not be empty.", nameof(refreshToken));
+
+        lock (_tokenLock)
+        {
+            _refreshToken = refreshToken;
+            _refreshTokenObtainedUtc = obtainedUtc;
+            _accessToken = null;
+            _tokenExpiry = DateTime.MinValue;
+            _lastRefreshError = null;
+            _lastRefreshErrorUtc = null;
+        }
+
+        await _statePersistenceService.SaveSpotifyRefreshTokenAsync(refreshToken, obtainedUtc);
+        _logger.LogInformation("Spotify refresh token updated via OAuth flow and persisted.");
+    }
+
+    /// <summary>
+    /// Exchanges an authorization code from the OAuth callback for a refresh token and stores it.
+    /// </summary>
+    public async Task ExchangeAuthorizationCodeAsync(string code, string redirectUri)
+    {
+        if (!IsConfigured)
+            throw new InvalidOperationException("Spotify client id and secret must be configured (SPOTIFY_ID / SPOTIFY_SECRET) before authorizing.");
+
+        AuthorizationCodeTokenRequest request = new(_clientId!, _clientSecret!, code, new Uri(redirectUri));
+        AuthorizationCodeTokenResponse response = await new OAuthClient(SpotifyClientConfig.CreateDefault()).RequestToken(request);
+
+        if (string.IsNullOrEmpty(response.RefreshToken))
+            throw new InvalidOperationException("Spotify did not return a refresh token for this authorization code.");
+
+        await SetRefreshTokenAsync(response.RefreshToken, DateTime.UtcNow);
+
+        lock (_tokenLock)
+        {
+            _accessToken = response.AccessToken;
+            _tokenExpiry = DateTime.UtcNow.AddSeconds(response.ExpiresIn - 60);
         }
     }
 
@@ -125,19 +214,43 @@ public class SpotifyService
                 new KeyValuePair<string, object?>("component", nameof(SpotifyService)));
             _dashboardState.RecordSpotifyStage("token_refresh", tokenRefreshDurationMs);
 
+            string? rotatedRefreshToken = null;
+            string newAccessToken;
+
             lock (_tokenLock)
             {
                 _accessToken = response.AccessToken;
-                if (!string.IsNullOrEmpty(response.RefreshToken))
+                if (!string.IsNullOrEmpty(response.RefreshToken) && response.RefreshToken != _refreshToken)
+                {
                     _refreshToken = response.RefreshToken;
+                    _refreshTokenObtainedUtc = DateTime.UtcNow;
+                    rotatedRefreshToken = response.RefreshToken;
+                }
 
                 _tokenExpiry = DateTime.UtcNow.AddSeconds(response.ExpiresIn - 60);
+                _lastRefreshError = null;
+                _lastRefreshErrorUtc = null;
+                newAccessToken = _accessToken!;
                 _logger.LogInformation("Spotify access token refreshed successfully. Expires at {ExpiryUtc}.", _tokenExpiry);
-                return _accessToken!;
             }
+
+            if (rotatedRefreshToken != null)
+            {
+                // Spotify rotated the refresh token; persist it or the old one would be reused after a restart.
+                await _statePersistenceService.SaveSpotifyRefreshTokenAsync(rotatedRefreshToken, DateTime.UtcNow);
+                _logger.LogInformation("Spotify issued a rotated refresh token; persisted it.");
+            }
+
+            return newAccessToken;
         }
         catch (Exception ex)
         {
+            lock (_tokenLock)
+            {
+                _lastRefreshError = ex.Message;
+                _lastRefreshErrorUtc = DateTime.UtcNow;
+            }
+
             _logger.LogError(ex, "Failed to refresh Spotify access token.");
             throw;
         }

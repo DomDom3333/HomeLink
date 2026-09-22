@@ -1,4 +1,4 @@
-namespace HomeLink.Telemetry;
+﻿namespace HomeLink.Telemetry;
 
 public static class TelemetryDashboardPage
 {
@@ -120,6 +120,17 @@ public static class TelemetryDashboardPage
         <div class="metric"><span>p99 (rolling)</span><span class="value" id="location-p99">0 ms</span></div>
         <div class="metric"><span>SLO (p95 &lt; 800ms)</span><span class="value badge" id="location-slo">n/a</span></div>
         <div class="hint" id="location-pct-window">Rolling percentile window: n/a</div>
+      </div>
+
+      <div class="card" id="spotify-auth-card">
+        <h2 class="title">Spotify Connection</h2>
+        <div class="metric"><span>Status</span><span class="value badge" id="spotify-auth-state">checking…</span></div>
+        <div class="metric"><span>Client credentials</span><span class="value" id="spotify-auth-configured">n/a</span></div>
+        <div class="metric"><span>Token obtained</span><span class="value" id="spotify-auth-obtained">n/a</span></div>
+        <div class="metric"><span>Access token expires</span><span class="value" id="spotify-auth-expires">n/a</span></div>
+        <div class="metric"><span>Last refresh error</span><span class="value" id="spotify-auth-error">none</span></div>
+        <div class="hint" id="spotify-auth-redirect">Redirect URI: n/a</div>
+        <div class="hint"><a id="spotify-auth-link" href="/api/spotify/authorize">Connect / reconnect Spotify →</a></div>
       </div>
 
       <div class="card" id="spotify-card">
@@ -570,6 +581,48 @@ public static class TelemetryDashboardPage
       dashboardState.timerId = setInterval(refresh, dashboardState.refreshIntervalMs);
     }
 
+    async function refreshSpotifyAuth() {
+      const stateElement = document.getElementById('spotify-auth-state');
+      try {
+        const response = await fetch('/api/spotify/status', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const status = await response.json();
+
+        stateElement.classList.remove('ok', 'warn', 'bad');
+        if (!status.configured) {
+          stateElement.textContent = 'no creds';
+          stateElement.classList.add('bad');
+        } else if (!status.authorized) {
+          stateElement.textContent = 'not linked';
+          stateElement.classList.add('bad');
+        } else if (status.lastRefreshError) {
+          stateElement.textContent = 'failing';
+          stateElement.classList.add('warn');
+        } else {
+          stateElement.textContent = 'connected';
+          stateElement.classList.add('ok');
+        }
+
+        document.getElementById('spotify-auth-configured').textContent = status.configured ? 'present' : 'missing';
+        document.getElementById('spotify-auth-obtained').textContent = formatTimestamp(status.refreshTokenObtainedUtc);
+        document.getElementById('spotify-auth-expires').textContent = formatTimestamp(status.accessTokenExpiresUtc);
+        document.getElementById('spotify-auth-error').textContent = status.lastRefreshError
+          ? `${status.lastRefreshError} (${formatTimestamp(status.lastRefreshErrorUtc)})`
+          : 'none';
+        document.getElementById('spotify-auth-redirect').textContent = `Redirect URI: ${status.redirectUri ?? 'n/a'}`;
+
+        const link = document.getElementById('spotify-auth-link');
+        link.textContent = status.setupKeyRequired
+          ? 'Connect / reconnect Spotify (append ?key=<setup key>) →'
+          : 'Connect / reconnect Spotify →';
+      } catch (error) {
+        stateElement.classList.remove('ok', 'warn', 'bad');
+        stateElement.classList.add('bad');
+        stateElement.textContent = 'unknown';
+        document.getElementById('spotify-auth-error').textContent = `status check failed (${error.message})`;
+      }
+    }
+
     async function refresh() {
       try {
         const response = await fetch('/api/telemetry/summary', { cache: 'no-store' });
@@ -590,6 +643,8 @@ public static class TelemetryDashboardPage
       } catch (error) {
         document.getElementById('updated').textContent = `refresh failed (${error.message})`;
       }
+
+      await refreshSpotifyAuth();
     }
 
     for (const button of document.querySelectorAll('.range-btn')) {

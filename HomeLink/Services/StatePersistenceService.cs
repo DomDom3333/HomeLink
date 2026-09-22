@@ -266,6 +266,92 @@ public class StatePersistenceService
         }
     }
 
+    /// <summary>
+    /// Stores the Spotify refresh token so it survives restarts (Spotify rotates refresh tokens on some refreshes).
+    /// </summary>
+    public async Task SaveSpotifyRefreshTokenAsync(string refreshToken, DateTime obtainedUtc)
+    {
+        await _dbLock.WaitAsync();
+        try
+        {
+            await using SqliteConnection connection = new(_connectionString);
+            await connection.OpenAsync();
+
+            await using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = @"
+                INSERT INTO spotify_auth (id, refresh_token, obtained_utc)
+                VALUES (1, $refreshToken, $obtainedUtc)
+                ON CONFLICT(id) DO UPDATE SET
+                    refresh_token = excluded.refresh_token,
+                    obtained_utc = excluded.obtained_utc,
+                    updated_utc = strftime('%Y-%m-%dT%H:%M:%fZ', 'now');";
+
+            command.Parameters.AddWithValue("$refreshToken", refreshToken);
+            command.Parameters.AddWithValue("$obtainedUtc", obtainedUtc.ToString("O", CultureInfo.InvariantCulture));
+            await command.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _dbLock.Release();
+        }
+    }
+
+    public async Task<(string RefreshToken, DateTime ObtainedUtc)?> LoadSpotifyRefreshTokenAsync()
+    {
+        await _dbLock.WaitAsync();
+        try
+        {
+            await using SqliteConnection connection = new(_connectionString);
+            await connection.OpenAsync();
+
+            await using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = @"
+                SELECT refresh_token, obtained_utc
+                FROM spotify_auth
+                WHERE id = 1;";
+
+            await using SqliteDataReader reader = await command.ExecuteReaderAsync();
+            if (!await reader.ReadAsync())
+                return null;
+
+            string refreshToken = await reader.IsDBNullAsync(0) ? string.Empty : reader.GetString(0);
+            if (string.IsNullOrWhiteSpace(refreshToken))
+                return null;
+
+            string obtainedRaw = await reader.IsDBNullAsync(1) ? string.Empty : reader.GetString(1);
+            DateTime obtainedUtc = DateTime.MinValue;
+            if (!string.IsNullOrWhiteSpace(obtainedRaw) &&
+                DateTime.TryParse(obtainedRaw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out DateTime parsedObtained))
+            {
+                obtainedUtc = parsedObtained;
+            }
+
+            return (refreshToken, obtainedUtc);
+        }
+        finally
+        {
+            _dbLock.Release();
+        }
+    }
+
+    public async Task ClearSpotifyRefreshTokenAsync()
+    {
+        await _dbLock.WaitAsync();
+        try
+        {
+            await using SqliteConnection connection = new(_connectionString);
+            await connection.OpenAsync();
+
+            await using SqliteCommand command = connection.CreateCommand();
+            command.CommandText = "DELETE FROM spotify_auth WHERE id = 1;";
+            await command.ExecuteNonQueryAsync();
+        }
+        finally
+        {
+            _dbLock.Release();
+        }
+    }
+
     private static void AddLocationParameters(SqliteCommand command, LocationInfo location)
     {
         command.Parameters.AddWithValue("$latitude", location.Latitude);
@@ -348,6 +434,13 @@ public class StatePersistenceService
                 scannable_code_url TEXT NOT NULL,
                 is_playing INTEGER NOT NULL,
                 last_sync_utc TEXT NOT NULL,
+                updated_utc TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS spotify_auth (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                refresh_token TEXT NOT NULL,
+                obtained_utc TEXT NOT NULL,
                 updated_utc TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
             );";
 

@@ -165,11 +165,43 @@ You need a Spotify Developer App with the `user-read-currently-playing` and `use
 
 ### Getting the Refresh Token
 
-Choose whichever method suits you. You only need to do this **once** — the app refreshes the token automatically at runtime.
+Choose whichever method suits you. You only need to do this **once** — the app refreshes the token
+automatically at runtime and stores any token Spotify rotates in `state/homelink-state.db`, so it
+survives restarts.
 
 ---
 
-#### Option A — Token Generator Tool (Easiest)
+#### Option A — Log in through HomeLink itself (Recommended)
+
+HomeLink can run the OAuth flow for you — no third-party tool, no manual code exchange.
+
+1. Set `SPOTIFY_ID` and `SPOTIFY_SECRET` (client id and secret of your Spotify app) and start HomeLink.
+2. Open `/telemetry/dashboard` and read the **Spotify Connection** card. It shows the exact
+   **redirect URI** this instance will use.
+3. Add that redirect URI verbatim to your Spotify app under *Settings → Redirect URIs*, e.g.
+   `https://homelink.example.com/api/spotify/callback`. Spotify requires HTTPS for non-loopback URIs.
+4. Click **Connect / reconnect Spotify** on the dashboard (or open `/api/spotify/authorize`), log in,
+   and approve.
+5. Spotify redirects back to `/api/spotify/callback`; HomeLink exchanges the code, stores the refresh
+   token in its SQLite state database, and starts using it immediately — no restart, and no need to
+   set `SPOTIFY_REFRESH_TOKEN` at all.
+
+The stored token takes precedence over `SPOTIFY_REFRESH_TOKEN`, so an old value in the environment
+does not override a token obtained this way.
+
+**Redirect URI resolution.** By default the URI is derived from the incoming request
+(`{scheme}://{host}/api/spotify/callback`), honouring `X-Forwarded-Proto` / `X-Forwarded-Host` so a
+reverse proxy works out of the box. Pin it explicitly with `SPOTIFY_REDIRECT_URI` (or
+`Spotify:RedirectUri`) when the derived value is not what you registered with Spotify.
+
+**Protecting the flow.** The endpoints are unauthenticated like the rest of HomeLink. If your
+instance is reachable from the internet, set `SPOTIFY_SETUP_KEY` — `/api/spotify/authorize` then
+requires `?key=<that value>`, so a stranger cannot re-link the display to their own account. The
+callback is additionally protected by a single-use `state` value that expires after 10 minutes.
+
+---
+
+#### Option B — Token Generator Tool
 
 Use **[alecchen.dev/spotify-refresh-token](https://alecchen.dev/spotify-refresh-token/)** (or a similar hosted OAuth helper). It handles the browser redirect and token exchange for you without running any local server.
 
@@ -179,11 +211,11 @@ Use **[alecchen.dev/spotify-refresh-token](https://alecchen.dev/spotify-refresh-
 4. Click **Get Refresh Token** and log in with the Spotify account you added to the allowlist.
 5. Copy the `refresh_token` from the result — that is your `SPOTIFY_REFRESH_TOKEN`.
 
-> The tool runs entirely in your browser. Your credentials are never sent to the tool's server. If you'd rather not use a third-party site, use Option B or C.
+> The tool runs entirely in your browser. Your credentials are never sent to the tool's server. If you'd rather not use a third-party site, use Option A, C or D.
 
 ---
 
-#### Option B — Home Assistant (If you already run HA)
+#### Option C — Home Assistant (If you already run HA)
 
 If you run [Home Assistant](https://www.home-assistant.io/), its built-in **Spotify** integration (Settings → Devices & Services → Add Integration → Spotify) performs the OAuth flow and maintains a token internally. You can extract the refresh token from HA's `.storage/auth.json` or by inspecting the integration's stored credentials — but the easier approach is to let HA act as the middle layer entirely and adapt HomeLink to call the HA REST API for now-playing state instead of Spotify directly.
 
@@ -191,7 +223,7 @@ This is an architectural change but avoids any Spotify credential management in 
 
 ---
 
-#### Option C — Manual PowerShell Exchange (No Third-Party Tools)
+#### Option D — Manual PowerShell Exchange (No Third-Party Tools)
 
 If you prefer to do everything yourself:
 
@@ -327,9 +359,11 @@ If you prefer MQTT, run an MQTT broker (e.g. [Eclipse Mosquitto](https://mosquit
 
 | Variable | Required | Description |
 |---|---|---|
-| `SPOTIFY_REFRESH_TOKEN` | **Yes** | Refresh token from Spotify OAuth flow. |
-| `SPOTIFY_ID` | For most apps | Spotify Client ID. Required to refresh tokens for confidential clients. |
-| `SPOTIFY_SECRET` | For most apps | Spotify Client Secret. Required for confidential clients. |
+| `SPOTIFY_REFRESH_TOKEN` | No* | Refresh token from the Spotify OAuth flow. *Not needed if you log in via `/api/spotify/authorize`; a token stored that way (or rotated by Spotify) lives in the state database and wins over this variable. |
+| `SPOTIFY_ID` | **Yes** | Spotify Client ID. Required for the login flow and to refresh tokens. |
+| `SPOTIFY_SECRET` | **Yes** | Spotify Client Secret. Required for the login flow and for confidential clients. |
+| `SPOTIFY_REDIRECT_URI` | No | Overrides the redirect URI used for the login flow. Default: derived from the request (`{scheme}://{host}/api/spotify/callback`, honouring `X-Forwarded-Proto`/`X-Forwarded-Host`). |
+| `SPOTIFY_SETUP_KEY` | No | When set, `/api/spotify/authorize` requires `?key=<value>`. Recommended for internet-facing instances. |
 | `KNOWN_LOCATIONS` | No | Semicolon-separated list of named places (see [Known Locations](#known-locations)). |
 
 ### appsettings.json Keys
@@ -338,6 +372,8 @@ If you prefer MQTT, run an MQTT broker (e.g. [Eclipse Mosquitto](https://mosquit
 |---|---|---|
 | `OpenTelemetry:ServiceName` | `HomeLink.Api` | Service name reported in traces. |
 | `OpenTelemetry:Otlp:Endpoint` | *(empty)* | OTLP exporter endpoint. Empty → console exporter. |
+| `Spotify:RedirectUri` | *(derived)* | Same as `SPOTIFY_REDIRECT_URI` (the environment variable wins). |
+| `Spotify:SetupKey` | *(empty)* | Same as `SPOTIFY_SETUP_KEY` (the environment variable wins). |
 | `DisplayRender:PlayingPollIntervalSeconds` | `15` | How often (seconds) to re-render while Spotify is playing. Range: 5–120. |
 | `DisplayRender:PausedPollIntervalSeconds` | `120` | How often to re-render while Spotify is paused. Range: 15–600. |
 | `DisplayRender:IdlePollIntervalSeconds` | `45` | How often to re-render when Spotify state is unknown. Range: 10–300. |
@@ -460,7 +496,7 @@ Returns the current pre-rendered 1-bpp frame as raw binary bytes (`application/o
 |---|---|
 | `200 OK` | Binary bitmap body. |
 | `304 Not Modified` | Frame unchanged since `If-None-Match` value. |
-| `401 Unauthorized` | Spotify is not authorized (missing/invalid `SPOTIFY_REFRESH_TOKEN`). |
+| `401 Unauthorized` | Spotify is not authorized — log in at `/api/spotify/authorize` or set `SPOTIFY_REFRESH_TOKEN`. |
 | `503 Service Unavailable` | Frame not yet ready — retry shortly (worker may still be initialising). |
 
 ---
@@ -545,6 +581,29 @@ OwnTracks-compatible webhook. Configure OwnTracks on your phone to POST to this 
 Processing is split into two stages:
 1. **Immediate** — raw coordinates are persisted to SQLite and the display worker is signalled.
 2. **Background** — `LocationEnrichmentWorker` calls Nominatim for reverse-geocoding and matches against KnownLocations, then updates the cache.
+
+---
+
+### Spotify Endpoints — `/api/spotify`
+
+#### `GET /api/spotify/status`
+
+JSON snapshot of the Spotify authorization state — whether client credentials are present, whether a
+refresh token is held, when it was obtained, the access-token expiry, the last refresh error (if
+any), the redirect URI this instance uses, and whether a setup key is required. Used by the
+dashboard's **Spotify Connection** card.
+
+#### `GET /api/spotify/authorize`
+
+Redirects the browser to Spotify's consent screen with the `user-read-currently-playing` and
+`user-read-playback-state` scopes. Requires `?key=<SPOTIFY_SETUP_KEY>` when that variable is set
+(`401` otherwise); returns `503` when `SPOTIFY_ID`/`SPOTIFY_SECRET` are missing.
+
+#### `GET /api/spotify/callback`
+
+OAuth callback. Validates the single-use `state` value, exchanges the authorization code for a
+refresh token, persists it to the state database and applies it immediately. Returns a small HTML
+confirmation page (`400` on a failed or expired authorization).
 
 ---
 
@@ -752,10 +811,31 @@ Any XYZ tile server works (Mapbox, Stadia, etc.) — just add your API key to th
 
 ### `401 Unauthorized` from display endpoints
 
-- Ensure `SPOTIFY_REFRESH_TOKEN` is set and is a valid, non-expired refresh token.
-- Ensure `SPOTIFY_ID` and `SPOTIFY_SECRET` are set (required for most Spotify app types).
+- Ensure HomeLink holds a refresh token: check `/api/spotify/status` or the dashboard's **Spotify Connection** card. If it says `not linked`, log in at `/api/spotify/authorize`.
+- Ensure `SPOTIFY_ID` and `SPOTIFY_SECRET` are set (required for the login flow and for most Spotify app types).
 - Check application logs for `"Spotify token refresh"` errors.
 - **Spotify API restriction:** If your Developer App was created after Spotify's 2024 API lockdown and has not been granted Extended Quota Mode, the `user-read-currently-playing` scope will be rejected for accounts not on the app's Development Mode allowlist. Add your Spotify account's email in the dashboard under *User Management*.
+
+### Spotify calls suddenly fail 100% of the time (`invalid_grant`)
+
+A refresh token that used to work stops working when the grant behind it is gone — you changed your
+Spotify password, removed HomeLink under *Account → Apps → Remove Access*, the app's client secret
+was rotated, or Spotify handed out a rotated refresh token that was never persisted (older HomeLink
+builds kept rotated tokens in memory only, so a restart fell back to the stale environment value).
+
+The fix is to re-link, not to restart:
+
+1. Open `/telemetry/dashboard` and check the **Spotify Connection** card — it shows the last refresh
+   error and the redirect URI to register.
+2. Make sure that redirect URI is listed in your Spotify app's *Settings → Redirect URIs*.
+3. Click **Connect / reconnect Spotify** (or open `/api/spotify/authorize`, adding
+   `?key=<SPOTIFY_SETUP_KEY>` if you configured one) and approve the consent screen.
+
+The new token is stored in `state/homelink-state.db` and used right away. Remove any stale
+`SPOTIFY_REFRESH_TOKEN` from your environment afterwards to avoid confusion — the stored token wins
+either way, but keeping a dead value around is misleading. Keep the state volume mounted in Docker
+(see [Persistent state across restarts](#persistent-state-across-restarts)) or the token is lost when
+the container is recreated.
 
 ### `503 Service Unavailable` from `/api/display/render`
 
