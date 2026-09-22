@@ -572,7 +572,7 @@ OwnTracks-compatible webhook. Configure OwnTracks on your phone to POST to this 
 | `lat` / `lon` | Latitude / longitude (required). |
 | `acc` | Accuracy in metres. |
 | `batt` / `bs` | Battery % and status (0=unknown, 1=unplugged, 2=charging, 3=full). |
-| `vel` | Speed in km/h — used by `HumanReadableService` for phrases like "Driving near …". |
+| `vel` | Speed in km/h — used by `HumanReadableService` for phrases like "Driving near …". Optional: OwnTracks only sends it when the underlying fix carries a speed, and uses a negative value for "unknown". When it is missing, zero or negative, HomeLink derives the speed from the distance and time between consecutive fixes (see `VelocityUtils`), so movement is still shown. |
 | `tst` | Unix timestamp of the fix. |
 | `conn` | Connection type: `w`=WiFi, `m`=mobile, `o`=offline. |
 
@@ -713,6 +713,7 @@ A sixth `|`-separated field accepts an icon identifier string. Currently stored 
   - Stationary → `"At Home"`, `"Chilling at Home"`, etc.
   - Walking speed → `"Walking near Home"`
   - Driving speed → `"Passing by Home"`
+- The velocity itself comes from the OwnTracks `vel` field when present, and is otherwise derived from consecutive fixes by `VelocityUtils`. Derived values are only produced when the two fixes are 5 s–15 min apart and at least 30 m apart, so GPS drift is not reported as movement.
 
 ---
 

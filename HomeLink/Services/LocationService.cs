@@ -15,9 +15,12 @@ public class LocationService
     private readonly List<KnownLocation> _knownLocations = new();
     private const string NominatimBaseUrl = "https://nominatim.openstreetmap.org/reverse";
     private const double EarthRadiusMeters = 6371000;
-    
+
     // Cached location data
     private LocationInfo? _cachedLocation;
+
+    // Last accepted raw fix, used to derive speed when OwnTracks does not report it.
+    private LocationFix? _lastFix;
 
     public LocationService(HttpClient httpClient, StatePersistenceService statePersistenceService, TelemetryDashboardState dashboardState)
     {
@@ -30,6 +33,11 @@ public class LocationService
         LoadKnownLocationsFromEnv();
 
         _cachedLocation = _statePersistenceService.LoadLocationAsync().GetAwaiter().GetResult();
+
+        if (_cachedLocation?.Timestamp is { } persistedTimestamp)
+        {
+            _lastFix = new LocationFix(_cachedLocation.Latitude, _cachedLocation.Longitude, persistedTimestamp);
+        }
     }
 
     #region Cached Location
@@ -45,6 +53,7 @@ public class LocationService
     public async Task<LocationInfo> SaveRawLocationSnapshot(double latitude, double longitude, OwnTracksMetadata? metadata = null)
     {
         long ingestStart = Stopwatch.GetTimestamp();
+        metadata = ResolveVelocity(latitude, longitude, metadata);
         string googleMapsUrl = GenerateGoogleMapsUrl(latitude, longitude);
         string qrCodeUrl = GenerateQrCodeUrl(googleMapsUrl);
 
@@ -107,6 +116,54 @@ public class LocationService
     {
         _cachedLocation = location;
     }
+
+    /// <summary>
+    /// Returns the metadata with a usable velocity.
+    /// OwnTracks only fills <c>vel</c> when the underlying fix carries a speed; fused, network and
+    /// significant-change reports frequently omit it or send -1 for "unknown". In those cases the speed
+    /// is derived from the distance and time between this fix and the previous one, so the display and
+    /// the human-readable phrases still reflect that the device is moving.
+    /// </summary>
+    private OwnTracksMetadata? ResolveVelocity(double latitude, double longitude, OwnTracksMetadata? metadata)
+    {
+        long fixTimestamp = metadata?.Timestamp ?? DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        LocationFix? previousFix = _lastFix;
+
+        // Keep the newest fix as the baseline; an out-of-order report must not rewind it.
+        if (previousFix == null || fixTimestamp >= previousFix.TimestampSeconds)
+            _lastFix = new LocationFix(latitude, longitude, fixTimestamp);
+
+        // OwnTracks uses negative values (typically -1) to mean "no speed available".
+        if (VelocityUtils.NormalizeReportedVelocity(metadata?.Velocity) is not null)
+            return metadata;
+
+        int? derivedVelocity = previousFix is null
+            ? null
+            : VelocityUtils.DeriveVelocityKmh(
+                previousFix.Latitude,
+                previousFix.Longitude,
+                previousFix.TimestampSeconds,
+                latitude,
+                longitude,
+                fixTimestamp);
+
+        if (derivedVelocity == null)
+        {
+            // Normalize a negative/unknown reading to null so consumers do not render "-1 km/h".
+            if (metadata is { Velocity: not null and <= 0 })
+                metadata.Velocity = null;
+            return metadata;
+        }
+
+        metadata ??= new OwnTracksMetadata { Timestamp = fixTimestamp };
+        metadata.Velocity = derivedVelocity;
+        return metadata;
+    }
+
+    /// <summary>
+    /// A raw position fix retained solely to derive speed for the next update.
+    /// </summary>
+    private sealed record LocationFix(double Latitude, double Longitude, long TimestampSeconds);
 
     private static void ApplyOwnTracksMetadata(LocationInfo location, OwnTracksMetadata? metadata)
     {
