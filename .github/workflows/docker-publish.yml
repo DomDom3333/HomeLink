@@ -6,8 +6,9 @@ name: Docker
 # documentation.
 
 on:
-  schedule:
-    - cron: '25 17 * * *'
+  # NOTE: no `schedule:` trigger here on purpose. GitHub disables scheduled
+  # workflows after 60 days of repository inactivity, and a workflow disabled
+  # that way stops running for *every* event — including pushes to main.
   push:
     branches: [ "main" ]
     # Publish semver tags as releases.
