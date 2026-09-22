@@ -1,9 +1,10 @@
-namespace HomeLink;
+﻿namespace HomeLink;
 
 using System.Diagnostics;
 using System.Globalization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpLogging;
+using Microsoft.AspNetCore.HttpOverrides;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
@@ -77,6 +78,15 @@ public static class Program
         string? spotifyClientId = Environment.GetEnvironmentVariable("SPOTIFY_ID");
         string? spotifyClientSecret = Environment.GetEnvironmentVariable("SPOTIFY_SECRET");
 
+        // Running behind a reverse proxy (e.g. homelink.example.com -> container), the OAuth redirect URI
+        // must be built from the public scheme/host, not the internal one.
+        builder.Services.Configure<ForwardedHeadersOptions>(options =>
+        {
+            options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto | ForwardedHeaders.XForwardedHost;
+            options.KnownNetworks.Clear();
+            options.KnownProxies.Clear();
+        });
+
         builder.Services.AddSingleton<RuntimeTelemetrySampler>();
         builder.Services.AddHostedService(sp => sp.GetRequiredService<RuntimeTelemetrySampler>());
         builder.Services.AddSingleton<TelemetryDashboardState>();
@@ -90,6 +100,8 @@ public static class Program
                 spotifyClientId,
                 spotifyClientSecret,
                 spotifyRefreshToken));
+
+        builder.Services.AddSingleton<Services.SpotifyOAuthService>();
 
         builder.Services.AddHttpClient<Services.LocationService>();
         builder.Services.AddSingleton<Services.LocationService>();
@@ -129,6 +141,8 @@ public static class Program
         });
 
         WebApplication app = builder.Build();
+
+        app.UseForwardedHeaders();
 
         // Configure the HTTP request pipeline.
         app.MapOpenApi();
